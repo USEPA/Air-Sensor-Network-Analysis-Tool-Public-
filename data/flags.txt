@@ -1,0 +1,21 @@
+# This flags file contains flag conditions.
+# Names are data.frame column names (without parenthesized units).
+# Binary boolean operators are: =, <, <=, >, >=, or, and.
+# There should be spaces around operators.
+# Note 'and' (like multiplication) has higher precendence than 'or' (addition).
+# R language operators are also allowed: &&, ||, == and parentheses.
+# For each row in a data.frame, each condition is evaluated for values on that
+# row and if TRUE then the condition number is included in the flagged column
+# value for that row. Multiple conditions are separated by ';'. For example,
+# 1;2
+# indicates that row is flagged because conditions 1 and 2 were TRUE.
+
+# 1. Here is a simple condition:
+temperature < 5 or temperature > 30
+
+# 2. Here is a multi-value condition:
+ humidity < 0 or humidity > 100 or humidity > 30 and temperature > 25
+
+# 3. Here is a timestamp condition:
+2022-06-01T12 <= timestamp and timestamp <= 2022-06-01T14
+

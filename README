@@ -1,0 +1,15 @@
+Welcome to ASNAT (Air Sensor Network Analysis Tool) -
+a free application for retrieval, mapping, summarizing, comparing, plotting
+and saving subsets of air sensor data read from webservices and local files.
+Project start: October 2022
+Contact: asnat@epa.gov
+
+Download the ASNAT User Manual from:
+https://ofmpub.epa.gov/rsig/rsigserver?asnat/download/ASNAT_User_Manual.pdf
+
+Follow its step-by-step instructions for running ASNAT from a web browser or
+downloading and installing it to run locally on your computer and several demos
+showcasing ASNAT features and other related information.
+
+The dev directory contains information for ASNAT developers.
+
