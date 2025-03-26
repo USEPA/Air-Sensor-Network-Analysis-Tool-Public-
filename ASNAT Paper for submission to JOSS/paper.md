@@ -9,9 +9,8 @@ tags:
 authors:
   - name: Karoline K. Barkjohn
     orcid: 0000-0001-6197-4499
-    #equal-contrib: true
-    corresponding: true # (This is how to denote the corresponding author)
-    affiliation: 1 #"1, 2" # (Multiple affiliations must be quoted)
+    corresponding: true 
+    affiliation: 1 
     
   - name: Todd Plessel
     affiliation: 2
