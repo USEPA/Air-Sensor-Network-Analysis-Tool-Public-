@@ -65,21 +65,21 @@ affiliations:
    index: 5
  - name: United States Environmental Protection Agency Region 7, United States of America
    index: 6
-#date: 11 March 2025
+date: 11 March 2025
 bibliography: paper.bib
 ---
 
-## **Summary**
+## Summary
 
 An R-Shiny application has been developed to assist air quality professionals in 1) comparing air sensor performance to nearby ambient air reference monitors, 2) applying basic quality assurance (QA) and quality control (QC), and 3) understanding local air quality conditions.
 
-## **Statement of need**
+## Statement of need
 
 Poor air quality is associated with negative health effects (Manisalidis et al. 2020). Air quality data are needed to understand local conditions and reduce exposure to air pollution. In the U.S., air quality is measured by ambient air monitors operated by state, local, and Tribal air agencies [@RN2]. Recent efforts supplement the national monitoring network with localized air sensor data to investigate variations at neighborhood scales. Air sensors typically cost one or two orders of magnitude less than conventional air monitors (e.g., \$10-\$10k). However, air sensor data may be noisy [@RN3; @RN4], biased, or inaccurate [@RN5]. Furthermore, sensor performance may vary over time [@RN6], concentration range, or the environment in which they operate (e.g., high RH) [@RN7; @RN8]. Sensors often must be compared with nearby measurements and corrected to improve the data quality [@RN9; @RN10; @RN11; @RN12]. The air sensor data analysis required to account for these limitations is challenging for users without extensive coding experience and for agencies faced with increased data volumes and community questions.
 
 Many existing air data analysis software tools require coding experience to be run in an open-source environment [@RN13; @RN14]; are specific to one manufacturer’s sensor [@RN14; @RN15]; or are designed to focus on single collocation sites [@RN16]. An analysis tool is needed to more easily aggregate data from multiple air quality data sources, perform standard QC, identify nearby sensors spatially, and create comprehensive visualizations. Generating air quality analysis in this form will further the capabilities of air sensors and potentially aid in protecting public health.
 
-## **Overview**
+## Overview
 
 The Air Sensor Network Analysis Tool (ASNAT) is an R-Shiny [@RN17; @RN18] application that integrates data from multiple sensor networks to provide a broader representation of local air quality. This tool can perform data correction as well as QC flagging to improve data quality so users can better understand the performance of new air sensor networks (including during extreme events like wildfires, dust storms, and fireworks). Air quality professionals who have base knowledge of air quality analysis are the target users of ASNAT.
 
@@ -99,13 +99,13 @@ This tool provides a variety of options to flag and/or remove anomalous data bas
 
 ![Figure 4. ASNAT flagging functionality.](Figure4.png)
 
-## **Limitations**
+## Limitations
 
 • Dataset size limits are dependent on local computing resources. Users should limit longer time analysis to smaller spatial ranges and/or longer averaging intervals.
 
 • Some background air quality knowledge is needed to successfully use this tool and make informed decisions based on ASNAT outputs. For example, nearest neighbor radius will depend on pollutant chemistry, sources, and geography. Local knowledge may be required to determine if outliers are due to sensor malfunctions or real short-term pollutant events.
 
-## **Acknowledgements**
+## Acknowledgements
 
 This work was supported by EPA internal funding (Air Climate and Energy National Research Program, Regional-ORD Applied Research Program, and Environmental Modeling and Visualization Laboratory). Thank you to PurpleAir for providing data (MTA #1261-19) and to Adrian Dybwad and Amanda Hawkins. Thank you to Heidi Paulsen (EPA), Sedona Ryan (UNC), Stephen Beaulieu (ARA), and Eliodora Chamberlain (EPA R7) for their project management and other support. Thank you to those who provided input, example datasets, and testing including: US EPA Amara Holder (Office of Research and Development), Megan MacDonald (ORD), Ryan Brown (Region 4), Daniel Garver (R4), Chelsey Laurencin (R4), Rachel Kirpes (R5), Dena Vallano (R9), Laura Barry (R9), Nicole Briggs (R10), Elizabeth Good (Office of Air Quality Planning and Standards), and Arjun Thapa (ORD former); South Coast Air Quality Management District Wilton Mui, Vasileios Papapostolou, Randy Lam, Namrata Shanmukh Panji, Ashley Collier-Oxandale (former); Washington Department of Ecology Nate May; Puget Sound Clean Air Agency Graeme Carvlin; New Jersey Department of Environmental Protection: Luis Lim; and Desert Research Institute: Jonathan Callahan.
 
