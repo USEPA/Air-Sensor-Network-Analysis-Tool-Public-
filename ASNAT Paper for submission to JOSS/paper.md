@@ -6,55 +6,44 @@ tags:
   - Quality Control
   - Open source
   - Visualization
+date: "11 March 2025"
+output: pdf_document
 authors:
   - name: Karoline K. Barkjohn
     orcid: 0000-0001-6197-4499
     corresponding: true 
-    affiliation: 1 
-    
+    affiliation: 1     
   - name: Todd Plessel
     affiliation: 2
-    
   - name: Jiacheng Yang
-    affiliation: 3
-    
+    affiliation: 3    
   - name: Gavendra Pandey
     affiliation: 3
-    orcid: 0000-0002-0642-9487
-    
+    orcid: 0000-0002-0642-9487    
   - name: Yadong Xu
-    affiliation: "2,4"
-    
+    affiliation: "2,4"    
   - name: Corey Mocka 
-    affiliation: 5
-    
+    affiliation: 5    
   - name: Stephen Krabbe
-    affiliation: 6
-    
+    affiliation: 6    
   - name: Catherine Seppanen
     affiliation: 3
-    orcid: 0009-0000-0756-670X
-    
+    orcid: 0009-0000-0756-670X    
   - name: Renée Bichler 
     affiliation: 3
-    orcid: 0000-0002-5732-5098
-    
+    orcid: 0000-0002-5732-5098    
   - name: Huy Nguyen Quang Tran
-    affiliation: 3
-    
+    affiliation: 3    
   - name: Saravanan Arunachalam
     affiliation: 3
-    orcid: 0000-0002-6836-6944
-    
+    orcid: 0000-0002-6836-6944    
   - name: Andrea Clements
     affiliation: 1
     orcid: 0000-0003-0764-5584
-  
-    
+bibliography: paper.bib
 affiliations:
  - name: United States Environmental Protection Agency Office of Research and Development, United States of America
    index: 1
-   ror: 00hx57361
  - name: General Dynamics Information Technology, United States of America
    index: 2
  - name: Institute for the Environment, The University of North Carolina at Chapel Hill, NC, United States of America
@@ -65,8 +54,6 @@ affiliations:
    index: 5
  - name: United States Environmental Protection Agency Region 7, United States of America
    index: 6
-date: 11 March 2025
-bibliography: paper.bib
 ---
 
 ## Summary
@@ -109,6 +96,6 @@ This tool provides a variety of options to flag and/or remove anomalous data bas
 
 This work was supported by EPA internal funding (Air Climate and Energy National Research Program, Regional-ORD Applied Research Program, and Environmental Modeling and Visualization Laboratory). Thank you to PurpleAir for providing data (MTA #1261-19) and to Adrian Dybwad and Amanda Hawkins. Thank you to Heidi Paulsen (EPA), Sedona Ryan (UNC), Stephen Beaulieu (ARA), and Eliodora Chamberlain (EPA R7) for their project management and other support. Thank you to those who provided input, example datasets, and testing including: US EPA Amara Holder (Office of Research and Development), Megan MacDonald (ORD), Ryan Brown (Region 4), Daniel Garver (R4), Chelsey Laurencin (R4), Rachel Kirpes (R5), Dena Vallano (R9), Laura Barry (R9), Nicole Briggs (R10), Elizabeth Good (Office of Air Quality Planning and Standards), and Arjun Thapa (ORD former); South Coast Air Quality Management District Wilton Mui, Vasileios Papapostolou, Randy Lam, Namrata Shanmukh Panji, Ashley Collier-Oxandale (former); Washington Department of Ecology Nate May; Puget Sound Clean Air Agency Graeme Carvlin; New Jersey Department of Environmental Protection: Luis Lim; and Desert Research Institute: Jonathan Callahan.
 
-## **Disclaimer**
+## Disclaimer
 
 The views expressed in this paper are those of the author(s) and do not necessarily represent the views or policies of the US EPA. Any mention of trade names, products, or services does not imply an endorsement by the US Government or the US EPA. The EPA does not endorse any commercial products, services, or enterprises.
