@@ -65,6 +65,7 @@ An R-Shiny application has been developed to assist air quality professionals in
 Poor air quality is associated with negative health effects [@RN1]. Air quality data are needed to understand local conditions and reduce exposure to air pollution. In the U.S., air quality is measured by air monitors operated by air agencies [@RN2]. Recent efforts supplement the national monitoring network with localized air sensor data to investigate variations at neighborhood scales. Air sensors typically cost less than conventional air monitors, but data may be noisy [@RN3; @RN4], biased, or inaccurate [@RN5]. Sensor performance may vary over time [@RN6], concentration range, or environmental conditions (e.g., high RH) [@RN7; @RN8]. Sensors are often compared with nearby measurements and corrected to improve data quality [@RN9; @RN10; @RN11; @RN12]. The air sensor data analysis required to account for these limitations is challenging for users without coding experience.
 
 Many existing air data analysis software tools require coding experience [@RN13; @RN14]; are specific to one manufacturer’s sensor [@RN14; @RN15]; or are designed to focus on a single collocation site [@RN16]. An analysis tool is needed to more easily support this work.
+
 ## Overview
 
 The Air Sensor Network Analysis Tool (ASNAT) is an R-Shiny [@RN17; @RN18] application that integrates data from multiple air quality networks. Air quality professionals who have base knowledge of air quality analysis are the target users of ASNAT.
