@@ -66,6 +66,7 @@ if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
   library(stringr)
   library(tidyr)
   library(scales)
+  library(mgcv)
 } else {
 
   # URL to download any required R packages from:
@@ -97,6 +98,7 @@ if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
   if (!require(stringr)) install.packages("stringr", repos = repository)
   if (!require(tidyr)) install.packages("tidyr", repos = repository)
   if (!require(scales)) install.packages("scales", repos = repository)
+  if (!require(mgcv)) install.packages("mgcv", repos = repository)
   # webshot::install_phantomjs()
 }
 
@@ -545,15 +547,17 @@ ui <- fluidPage(
         cursor: pointer;
       }
     ")),
+
   tags$style(HTML("
     #table3_interactive table.dataTable thead th {
       background-color: #f7f7f7;
-      border-bottom: 2px solid #ddd; 
+      border-bottom: 2px solid #ddd;
       padding: 4px 25px 4px 4px; /* top, right, bottom, left */
-      text-align: center; 
-      font-weight: bold; 
+      text-align: center;
+      font-weight: bold;
     }
   "))
+
 
 
     #tags$style(type="text/css",
@@ -569,7 +573,7 @@ ui <- fluidPage(
   verbatimTextOutput("message_area", placeholder = TRUE),
 
   fluidRow(
-    column(4L,
+    column(3L,
       h5("1. Pan/zoom map to region of interest."),
       h5("2. Start Date,Days to retrieve,Aggregate:"),
 
@@ -593,8 +597,10 @@ ui <- fluidPage(
 
                shinyBS::bsTooltip("days",
                                  "Number of days of data to load.",
-                                 options = tooltip_options)),
+                                 options = tooltip_options))
+      ),
 
+      fluidRow(
         column(4L,
                selectInput("timestep_size",
                            label = "Timestep:  ",
@@ -666,6 +672,16 @@ ui <- fluidPage(
                         tags$li("Copied the key correctly")
                        )
       ),
+
+      actionButton("validate_purple_air_key",
+                   label = "Validate Purple Air Key",
+                   style = "color : red;"),
+
+      shinyBS::bsTooltip("vslidate_purple_air_key",
+                         paste0("You must validate the Purple Air key ",
+                                "(a webservice call) ",
+                                "before retrieving PurpleAir data."),
+                         options = tooltip_options),
 
       shinyBS::bsModal("invalid_retrieve_data_Modal",
                        "Data Retrieval Failed",
@@ -874,24 +890,28 @@ ui <- fluidPage(
       downloadButton(outputId = "download_data", label = "Save Data"),
 
       shinyBS::bsTooltip("save_data",
-                         "Save all loaded datasets and tables.",
+                         paste0("Save all loaded datasets and computed tables",
+                                " (see Tables tab)."),
+                         placement = "top",
                          options = tooltip_options),
 
       shinyBS::bsTooltip("download_data",
-                         "Save all loaded datasets and tables as a zip file.",
+                         paste0("Save all loaded datasets and computed tables",
+                                " (see Tables tab) as a zip file."),
+                         placement = "top",
                          options = tooltip_options),
 
       actionButton("quit", label = "Quit"),
 
       shinyBS::bsTooltip("quit",
                          "Save state and quit application.",
+                         placement = "top",
                          options = tooltip_options)
-
     ),
 
     # The following GUI elements appear as tabs on the right side of the page:
 
-    column(8L,
+    column(9L,
       tabsetPanel(id = "tabs",
 
         tabPanel("Map", value = "map",
@@ -1489,12 +1509,13 @@ ui <- fluidPage(
                                     paste0("Summarize and compare selected ",
                                            "X and optional Y datasets."),
                                     options = tooltip_options),
-                 actionButton("summary_statistics", 
-                              label = "summary statistics for dataset X"),
-                
+                 actionButton("summary_statistics",
+                              label = "Summary statistics for flagged dataset"),
+
                  shinyBS::bsTooltip("summary_statistics",
-                                    "Generate validation statistics for the selected datasets.",
-                                    options = tooltip_options),    
+                                    "Generate validation statistics for the selected flag dataset.",
+                                    options = tooltip_options),
+
                  tableOutput("table1"),
                  tableOutput("table2"),
                  tableOutput("table3"),
@@ -1504,6 +1525,10 @@ ui <- fluidPage(
         ),
 
         tabPanel("Plots", value = "plots",
+
+                 h5(paste0("(Click Tables / 'Summarize and Compare X and Y' ",
+                           "button before making plots.)"),
+                    style = "color: red"),
 
                  h5("Neighbors Map - Shows Neighbors of (Single) Selected Dataset X Site"),
 
@@ -1642,20 +1667,7 @@ ui <- fluidPage(
                     # Display a custom message at the top
                     h3("Regression Correction Panel"),
                     h5("(Please ensure that dataset X is the reference data and dataset Y is the target data.)"),
-                    h4("Neighboring Points"),
-                    DT::dataTableOutput("selectable_correction_table"),
-                    # Adding select all and unselect all buttons
-                    div(class = "btn-group", style = "margin-bottom:10px",
-                      actionButton("select_all", "Select All", icon = icon("check-circle"), class = "btn btn-primary", style = "margin-right : 10px;"),
-                      actionButton("unselect_all", "Unselect All", icon = icon("times-circle"), class = "btn btn-primary"),
-                    ),
 
-                    br(),
-
-                    h4("Selected IDs:"),
-                    verbatimTextOutput("selected_ids_display"),
-
-                    br(),
 
                     h4("Correction Models"),
                     tabsetPanel(
@@ -1663,8 +1675,24 @@ ui <- fluidPage(
 
                         br(),
 
-                        selectInput("regression_type", "Select Regression Type",
-                                    choices = c("Linear")),
+                        # selectInput("regression_type", "Select Regression Type",
+                        #             choices = c("Linear", "Quadratic")),
+
+                        h4("Neighboring Points"),
+                        DT::dataTableOutput("selectable_correction_table"),
+                        # Adding select all and unselect all buttons
+                        div(class = "btn-group", style = "margin-bottom:10px",
+                          actionButton("select_all", "Select All", icon = icon("check-circle"), class = "btn btn-primary", style = "margin-right : 10px;"),
+                          actionButton("unselect_all", "Unselect All", icon = icon("times-circle"), class = "btn btn-primary"),
+                        ),
+
+                        br(),
+
+                        h4("Selected IDs:"),
+                        verbatimTextOutput("selected_ids_display"),
+
+                        br(),
+
                         # selectInput("regression_type", "Select Regression Type",
                         #             choices = c("Linear", "Polynomial", "Exponential", "Logarithmic", "Power")),
                         actionButton("generate_coefficients", "Generate Coefficients", class = "btn btn-primary"),
@@ -1924,10 +1952,10 @@ ui <- fluidPage(
                  fluidRow(
                    column(4),
                    column(4),
-                   column(4, radioButtons("calendar_sel", label = "What values do you want to see in the plot?",
-                                          choices = c("value", "date"), selected = "value"
+                   column(4, radioButtons("calendar_sel", label = HTML("Select the values to display in the plot:<br><small>(AQI is available when PM2.5 or PM10 is selected)</small>"),
+                                          choices = c("value", "value_aqi", "date", "date_aqi"), selected = "value"
                                           )
-                   )
+                   ),
                  ),
                  p(),
                  fluidRow(
@@ -2047,20 +2075,6 @@ server <- function(input, output, session) {
   #https://stackoverflow.com/questions/18037737/how-to-change-maximum-upload-size-exceeded-restriction-in-shiny-and-save-user#18037912
   options(shiny.maxRequestSize = 500L * 1024L * 1024L)
 
-  rsigserver_host <- unlist(strsplit(rsigserver_url, "/"))[[3L]]
-  output$message_area <-
-    renderPrint({cat("Welcome. ",
-                     "R-version: ", paste0(R.version["major"], ".",
-                                           R.version["minor"]),
-                     " platform: ", ASNAT_platform(),
-                     " host: ", Sys.info()[[4L]],
-                     " wd: ", getwd(),
-                     " pid: ", Sys.getpid(),
-                     " session$token: ", session$token,
-                     " rsigserver-host: ", rsigserver_host,
-                     "\n(Network and file I/O messages will appear here).",
-                     sep = "")})
-
   # Declare client-specific (non-shared) model object.
   # If running locally then just reference the global default_model
   # else running remote-hosted (e.g., rstudio-connect) so create a model object
@@ -2128,6 +2142,7 @@ server <- function(input, output, session) {
   ASNAT_set_warning_callback(show_warning)
 
 
+  rsigserver_host <- unlist(strsplit(rsigserver_url, "/"))[[3L]]
 
   if (!rsigserver_is_reachable) {
     ASNAT_warning(paste0("Warning: ", rsigserver_host, " is unreachable.\n",
@@ -2135,6 +2150,18 @@ server <- function(input, output, session) {
   }
 
 
+  output$message_area <-
+    renderPrint({cat("Welcome to ASNAT version: ", version(model),
+                     " R-version: ", paste0(R.version["major"], ".",
+                                           R.version["minor"]),
+                     " platform: ", ASNAT_platform(),
+                     " host: ", Sys.info()[[4L]],
+                     " wd: ", getwd(),
+                     " pid: ", Sys.getpid(),
+                     " session$token: ", session$token,
+                     " rsigserver-host: ", rsigserver_host,
+                     "\n(Network and file I/O messages will appear here).",
+                     sep = "")})
 
   # the_map (leaflet) is another client-specific (non-shared) variable:
 
@@ -2970,12 +2997,12 @@ server <- function(input, output, session) {
     adjust <- FALSE
     delta <- 0.001
 
-    if (west == east) {
+    if (west >= east) {
       east <- west + 1.0
       adjust <- TRUE
     }
 
-    if (south == north) {
+    if (south >= north) {
       north <- south + 1.0
       adjust <- TRUE
     }
@@ -3000,12 +3027,12 @@ server <- function(input, output, session) {
       adjust <- TRUE
     }
 
-    #if (adjust || (east - west) < delta || (north - south) < delta) {
+    if (adjust || (east - west) < delta || (north - south) < delta) {
       west <- west - delta
       east <- east + delta
       south <- south - delta
       north <- north + delta
-    #}
+    }
 
     the_map <<- fitBounds(the_map, west, south, east, north)
     #the_map <<- flyToBounds(the_map, west, south, east, north)
@@ -3031,10 +3058,10 @@ server <- function(input, output, session) {
 
     # Zoom to New York City - Long Island:
 
-    west <- -74.3
-    east <- -72.7
-    south <- 40.5
-    north <- 41.4
+    west <- -74.86716
+    east <- -72.14255
+    south <- 40.17405
+    north <- 41.71742
     longitude_center <- (west + east) * 0.5
     latitude_center <- (south + north) * 0.5
     ASNAT_dprint("map: [%f, %f] [%f, %f]\n", west, east, south, north)
@@ -3307,7 +3334,7 @@ server <- function(input, output, session) {
     the_map <<- leaflet::clearControls(the_map) # This clears legends and the timestamp!
     the_map <<- draw_timestamp_on_map() # So add timestamp back.
 
-    # Also clear the_site_nieghbor_map
+    # Also clear the_site_neighbor_map
 
     the_site_neighbor_map <<- leaflet::clearMarkers(the_site_neighbor_map) # Glyphs.
     the_site_neighbor_map <<- leaflet::clearControls(the_site_neighbor_map) #  Legend.
@@ -3364,17 +3391,31 @@ server <- function(input, output, session) {
 
 
 
-  # Callback for purple_air_key:
+  # Callback for validate_purple_air_key button.
+  # Note this actionButton callback is used instead of a textInput callback for
+  # purple_air_key to avoid multiple webservice calls on incomplete input as
+  # the user slowly types in their key.
+  # BUG in RShiny: testInput callbacks should only get called when the
+  # user hits enter key or the input focus moves out of the textInput
+  # indicating that the user is done typing!
 
-  observeEvent(input$purple_air_key, {
-    ASNAT_dprint("In purple_air_key callback.\n")
+  observeEvent(input$validate_purple_air_key, {
+    ASNAT_dprint("In vslidate_purple_air_key callback.\n")
     key <- input$purple_air_key
 
     if (ASNAT_is_conforming_purple_air_key(key)) {
-      purple_air_key(model) <<- key
-    } else {
-      warning_text <- "Non-conforming PurpleAir Key."
-      warning(warning_text, call. = FALSE, immediate. = TRUE, noBreaks. = FALSE)
+      purple_air_key(model) <<- key # Causes webservice call to retrieve sites.
+      update_purple_air_sites_menu()
+      ok <- ok(model) # Did webservice call succeed?
+
+      if (!ok) {
+        ASNAT_warning("Failed to retrieve PurpleAir site locations.")
+      } else {
+        ASNAT_warning("Updated PurpleAir sites menu.")
+      }
+
+    } else if (nchar(key) > 0L) {
+      ASNAT_warning("Non-conforming PurpleAir Key.")
       # toggleModal(session, "invalidKeyModal", toggle = "toggle")
     }
   })
@@ -4782,29 +4823,24 @@ server <- function(input, output, session) {
 
       rownames(data_frame) <- NULL
 
-      # options_list =
-      #   list( scrollY = "500px",     # Enable vertical scroll w/ 500px height.
-      #         scrollX = TRUE,        # Enable horizontal scrolling if needed.
-      #         scroller = TRUE,       # Enable scroller extension.
-      #         deferRender = TRUE,    # Improve performance.
-      #         scrollCollapse = TRUE, # Collapse empty scroll space.
-      #         pageLength = -1,       # Show all rows.
-      #         dom = "frti" # Filter, processing, table, info (no pagination).
-      #   )
+      # Specify custom page length menu:
 
-      options_list = 
-      list(
-        scrollY = "500px",    
-        scrollX = TRUE,       
-        deferRender = TRUE,    
-        scrollCollapse = TRUE, 
-        pageLength = 10,  
-        lengthMenu = list(c(10, 25, 50, 100, 200, 500, 1000, 2500, 5000, 10000, -1), c(10, 25, 50, 100, 200, 500, 1000, 2500, 5000, 10000, "All")),  
-        dom = "lfrtip" # Filter, processing, table, info (no pagination).
-      )
+      page_lengths <- c(10, 25, 50, 100, 200, 500, 1000, 2500, 5000, 10000, -1)
+      page_length_names <- as.character(page_lengths)
+      page_length_names[length(page_lengths)] <- "All"
 
-
-
+      options_list <-
+        list(scrollY = "500px",     # Enable vertical scroll w/ 500px height.
+             scrollX = TRUE,        # Enable horizontal scrolling if needed.
+             scroller = TRUE,       # Enable scroller extension.
+             deferRender = TRUE,    # Improve performance.
+             scrollCollapse = TRUE, # Collapse empty scroll space.
+             #pageLength = -1,       # Show all rows.
+             pageLength = 10,
+             lengthMenu = list(page_lengths, page_length_names),
+             #dom = "frti" # Filter, processing, table, info (no pagination).
+             dom = "lfrtip" # Filter, processing, table, info, pagination.
+        )
 
       output$dataset_content_to_flag <-
         DT::renderDT(data_frame, options = options_list)
@@ -5635,12 +5671,29 @@ server <- function(input, output, session) {
                                      caption = caption_y,
                                      caption.placement = "top")
 
+        regression_method <- input$regression_type
+
+        # pass the regression type to the model
+        if (!is.null(input$pre_regression_type)) {
+          the_correction_selection <-
+            switch(input$pre_regression_type,
+              "single" = 0L,
+              "multi_additive" = 1L,
+              "multi_interactive" = 2L
+            )
+          correction_selection(model) <<- the_correction_selection
+        }
+
         model <<- compare_datasets(model,
                                    dataset_x_name, dataset_x_variable,
                                    dataset_y_name, dataset_y_variable,
-                                   dataset_z_name, dataset_z_variable)
+                                   dataset_z_name = dataset_z_name,
+                                   dataset_z_variable = dataset_z_variable,
+                                   regression_method = regression_method)
 
         the_comparison_data_frame <- comparison_data_frame(model)
+
+        correction_selection(model) <<- 0L
 
         if (nrow(the_comparison_data_frame) > 0L) {
           ASNAT_dprint("the_comparison_data_frame:\n")
@@ -5655,6 +5708,7 @@ server <- function(input, output, session) {
           fancy_column_names <-
             vapply(column_names, fancy_label, c(""), USE.NAMES = FALSE)
           colnames(the_comparison_data_frame) <- fancy_column_names
+
           output$table3 <-
             renderTable(the_comparison_data_frame,
                         caption = caption, caption.placement = "top")
@@ -5721,67 +5775,54 @@ server <- function(input, output, session) {
     ASNAT_elapsed_timer("summarize_and_compare_datasets_x_y:", timer)
   }
 
-  get_summary_statistics <- function() {
-    ASNAT_dprint("get_summary_statistics called.\n")
+
+
+  # Compute and show summary statistics table for flag dataset:
+
+  summarize_statistics <- function() {
+    ASNAT_dprint("summarize_statistics called.\n")
     timer <- ASNAT_start_timer()
 
-    ASNAT_dprint("In handle_summarize(), summarizing = %d\n",
-                as.integer(summarizing))
+    # Clear tables on the Tables tab:
 
-    ASNAT_debug(str, input$dataset_x_menu)
-    ASNAT_debug(str, input$dataset_x_menu[1L])
-
-    have <- have_datasets()
-    have_x <- have$x
-
-    model <<- delete_dataset_summaries(model)
-    clear_tables_and_plots()
-
-    if (!have_x) {
-      return(NULL)
-    }
-
-    ASNAT_dprint("  have_x = %d, have_y = %d\n",
-                as.integer(have_x), as.integer(have_y))
-    ASNAT_dprint("  set summarizing = %d\n", as.integer(summarizing))
-
-    dataset_x_name <- input$dataset_x_menu[1L]
-    dataset_x_variable <- input$dataset_x_variable_menu[1L]
-
-    coverages <- dataset_coverages(model)
-    result <- which(coverages == dataset_x_name)
+    output$table1 <- renderTable({NULL})
+    output$table2 <- renderTable({NULL})
+    output$table3 <- renderTable({NULL})
+    output$table4 <- renderTable({NULL})
+    output$table5 <- renderTable({NULL})
+    output$table3_interactive <- DT::renderDT({NULL})
 
     dataset_index <- get_flag_dataset_index()
 
-    if (dataset_index > 0L) {
-      the_dataset <- dataset(model, dataset_index)
-      data_frame <- data_frame(the_dataset)
+    if (dataset_index == 0L) {
+      ASNAT_warning("No data available for summary statistics")
+      return(FALSE)
     }
-    if (is.null(data_frame)) {
-      showNotification("No data available for summary statistics", type = "error")
-      return(NULL)
-    }
-    
+
+    the_dataset <- dataset(model, dataset_index)
+    dataset_name <- coverage(the_dataset)
+    data_frame <- data_frame(the_dataset)
+
     # Calculate flag statistics
     flag_stats <- calculate_flag_statistics(data_frame)
-    
+
     # Create a simple data frame for main summary display
     summary_df <- data.frame(
-      Metric = c("Total Records", "Valid Records", "Valid Records (%)", 
+      Metric = c("Total Records", "Valid Records", "Valid Records (%)",
                 "Flagged Records", "Flagged Records (%)"),
-      Value = c(flag_stats$total_records, flag_stats$valid_records, 
+      Value = c(flag_stats$total_records, flag_stats$valid_records,
               sprintf("%.2f%%", flag_stats$valid_percent),
-              flag_stats$flagged_records, 
+              flag_stats$flagged_records,
               sprintf("%.2f%%", flag_stats$flagged_percent))
     )
-    
+
     # Display the main summary table
     output$table1 <- renderTable(
       summary_df,
-      caption = paste("Summary Statistics for", dataset_x_name),
+      caption = paste("Summary Statistics for", dataset_name),
       caption.placement = "top"
     )
-    
+
     # Create a data frame for flag type percentages
     flag_types <- list(
       "65" = "Temporal inconsistencies",
@@ -5797,7 +5838,7 @@ server <- function(input, output, session) {
       "90" = "Redundancy check (duplicate)",
       "95" = "Timestamps format check"
     )
-    
+
     # Create a data frame for flag type counts and percentages
     flag_df <- data.frame(
       Flag = character(),
@@ -5806,9 +5847,10 @@ server <- function(input, output, session) {
       Percentage = character(),
       stringsAsFactors = FALSE
     )
-    
+
     # Add each flag type to the data frame
     for (flag in names(flag_types)) {
+
       if (!is.null(flag_stats$flag_counts[[flag]])) {
         count <- flag_stats$flag_counts[[flag]]
         percent <- flag_stats$flag_counts[[paste0(flag, "_percent")]]
@@ -5821,38 +5863,39 @@ server <- function(input, output, session) {
         ))
       }
     }
-    
+
     # Sort flag types by count (descending)
     if (nrow(flag_df) > 0) {
       flag_df <- flag_df[order(-flag_df$Count), ]
     }
-    
+
     # Display the flag type percentages table
     output$table2 <- renderTable(
       flag_df,
-      caption = paste("Flag Distribution for", dataset_x_name),
+      caption = paste("Flag Distribution for", dataset_name),
       caption.placement = "top"
     )
-    
+
     # If device-level statistics are available, display them in table3
     if ("id(-)" %in% colnames(data_frame)) {
       device_stats <- calculate_device_statistics(data_frame)
-      
+
       if (nrow(device_stats) > 0) {
         # Create a copy of device_stats for display
-        display_stats <- device_stats[, c("device_id", "total_records", "valid_records", 
-                                        "valid_percent", "flagged_records", 
+        display_stats <- device_stats[, c("device_id", "total_records", "valid_records",
+                                        "valid_percent", "flagged_records",
                                         "flagged_percent")]
-        
+
         # Format percentages for display
         display_stats$valid_percent <- sprintf("%.2f%%", display_stats$valid_percent)
         display_stats$flagged_percent <- sprintf("%.2f%%", display_stats$flagged_percent)
-        
+
         # Get flag percentage columns
         flag_percent_cols <- grep("^flag_\\d+_percent$", colnames(device_stats), value = TRUE)
-        
+
         # Add flag percentage columns to display_stats
         if (length(flag_percent_cols) > 0) {
+
           for (col in flag_percent_cols) {
             flag_code <- gsub("flag_|_percent", "", col)
             flag_name <- flag_types[[flag_code]]
@@ -5860,32 +5903,34 @@ server <- function(input, output, session) {
             display_stats[[flag_name]] <- sprintf("%.2f%%", device_stats[[col]])
           }
         }
-        
+
         # Rename columns for display
-        colnames(display_stats)[1:6] <- c("Device ID", "Total Records", "Valid Records", 
-                                        "Valid Records (%)", "Flagged Records", 
+        colnames(display_stats)[1:6] <- c("Device ID", "Total Records", "Valid Records",
+                                        "Valid Records (%)", "Flagged Records",
                                         "Flagged Records (%)")
-        
+
         # Render the device statistics table with flag percentages
         output$table3_interactive <- DT::renderDataTable({
           DT::datatable(display_stats,
-                        caption = paste("Device-Level Statistics for", dataset_x_name),
+                        caption =
+                          paste("Device-Level Statistics for", dataset_name),
                         options = list(paging = FALSE),
                         class = 'row-border stripe hover nowrap')
         })
       }
     }
-    
-    ASNAT_elapsed_timer("get_summary_statistics:", timer)
+
+    ASNAT_elapsed_timer("summarize_statistics:", timer)
     return(TRUE)
   }
+
 
 
   # Function to calculate flag-based statistics for a dataset
   calculate_flag_statistics <- function(data_frame) {
     # Total number of records
     total_records <- nrow(data_frame)
-    
+
     # Check if flagged column exists
     if (!"flagged(-)" %in% colnames(data_frame)) {
       return(list(
@@ -5897,16 +5942,16 @@ server <- function(input, output, session) {
         flag_counts = list()
       ))
     }
-    
+
     # Count records with any flags
     flagged_records <- sum(data_frame[["flagged(-)"]] != "0" & !is.na(data_frame[["flagged(-)"]]))
-    
+
     # Calculate percentage of flagged records
     percent_flagged <- (flagged_records / total_records) * 100
-    
+
     # Count records by specific flag types
     flag_counts <- list()
-    
+
     # Define flag types and their descriptions
     flag_types <- list(
       "65" = "Date validation",
@@ -5922,13 +5967,13 @@ server <- function(input, output, session) {
       "90" = "Redundancy check",
       "95" = "Format check"
     )
-    
+
     # Count occurrences of each flag type
     for (flag in names(flag_types)) {
       flag_counts[[flag]] <- sum(grepl(flag, data_frame[["flagged(-)"]]))
       flag_counts[[paste0(flag, "_percent")]] <- (flag_counts[[flag]] / total_records) * 100
     }
-    
+
     # Return statistics
     return(list(
       total_records = total_records,
@@ -5940,11 +5985,13 @@ server <- function(input, output, session) {
     ))
   }
 
+
+
   # # Function to calculate per-device statistics with flag type percentages
   calculate_device_statistics <- function(data_frame) {
     # Get unique device IDs
     device_ids <- unique(data_frame[["id(-)"]])
-    
+
     # Define flag types
     flag_types <- list(
       "65" = "Date validation",
@@ -5960,7 +6007,7 @@ server <- function(input, output, session) {
       "90" = "Redundancy check",
       "95" = "Format check"
     )
-    
+
     # Initialize results data frame with basic columns
     device_stats <- data.frame(
       device_id = character(),
@@ -5971,17 +6018,17 @@ server <- function(input, output, session) {
       flagged_percent = numeric(),
       stringsAsFactors = FALSE
     )
-    
+
     # Add columns for each flag type percentage
     for (flag in names(flag_types)) {
       device_stats[[paste0("flag_", flag, "_percent")]] <- numeric()
     }
-    
+
     # Calculate statistics for each device
     for (device_id in device_ids) {
       device_data <- data_frame[data_frame[["id(-)"]] == device_id, ]
       total_records <- nrow(device_data)
-      
+
       # Initialize row with basic stats
       device_row <- data.frame(
         device_id = device_id,
@@ -5992,24 +6039,24 @@ server <- function(input, output, session) {
         flagged_percent = 0,
         stringsAsFactors = FALSE
       )
-      
+
       # Add columns for each flag type percentage with default value 0
       for (flag in names(flag_types)) {
         device_row[[paste0("flag_", flag, "_percent")]] <- 0
       }
-      
+
       # Calculate flag statistics if flagged column exists
       if ("flagged(-)" %in% colnames(device_data)) {
         flagged_records <- sum(device_data[["flagged(-)"]] != "0" & !is.na(device_data[["flagged(-)"]]))
         valid_records <- total_records - flagged_records
         valid_percent <- (valid_records / total_records) * 100
         flagged_percent <- (flagged_records / total_records) * 100
-        
+
         device_row$valid_records <- valid_records
         device_row$valid_percent <- valid_percent
         device_row$flagged_records <- flagged_records
         device_row$flagged_percent <- flagged_percent
-        
+
         # Calculate percentage for each flag type
         for (flag in names(flag_types)) {
           flag_count <- sum(grepl(flag, device_data[["flagged(-)"]]))
@@ -6017,13 +6064,15 @@ server <- function(input, output, session) {
           device_row[[paste0("flag_", flag, "_percent")]] <- flag_percent
         }
       }
-      
+
       # Add this device's row to the results
       device_stats <- rbind(device_stats, device_row)
     }
-    
+
     return(device_stats)
   }
+
+
 
   # Callback for Interactive (color) Plots checkbox
   # (also uses fancy labels in interactive plots):
@@ -6079,24 +6128,17 @@ server <- function(input, output, session) {
   # Callback for Summarize and Compare X & Y button:
 
   observeEvent(input$summarize, {
-
     summarize_and_compare_datasets_x_y()
     update_neighbors_menu()
   })
 
+
+
  # callback for summary_statistics button
    observeEvent(input$summary_statistics, {
-    get_summary_statistics()
-    # # Clear tables 1-5
-    # output$table1 <- renderTable(NULL)
-    # output$table2 <- renderTable(NULL)
-    # output$table3 <- renderTable(NULL)
-    # output$table4 <- renderTable(NULL)
-    # output$table5 <- renderTable(NULL)
-
-    # summarize_and_compare_datasets_x_y()
-    # update_neighbors_menu()
+    summarize_statistics()
   })
+
 
 
   ############################# Boxplot functions #############################
@@ -6970,11 +7012,17 @@ server <- function(input, output, session) {
 
   # Helper to make stats label for scatter plot:
 
-  compute_scatterplot_stats <- function(x_values, y_values, interactive) {
+  compute_scatterplot_stats <- function(x_values, y_values,
+                                        interactive, type = "default",
+                                        r_squared_given = NULL) {
+
+    complete_indices <- complete.cases(x_values, y_values)
+
+    # Keep only complete cases
+    x_values <- x_values[complete_indices]
+    y_values <- y_values[complete_indices]
 
     n <- length(x_values)
-    correlation <- if (n > 1L) cor(x_values, y_values) else 0.0
-    r_squared <- correlation * correlation
     err <- x_values - y_values
     se <- err * err
     mse <- mean(se, na.rm = TRUE)
@@ -6982,19 +7030,60 @@ server <- function(input, output, session) {
     mean_x_values <- mean(x_values, na.rm = TRUE)
     nrmse <- rmse / mean_x_values * 100.0
     abs_x_values <- abs(x_values)
-    nmbe <- mean(err / abs_x_values, na.rm = TRUE) * 100.0
+    non_zero_indices <- which(abs_x_values != 0)
+    # Compute NMBE only on these indices
+    nmbe <- mean(err[non_zero_indices] / abs_x_values[non_zero_indices], na.rm = TRUE) * 100.0
     slope <- cov(x_values, y_values) / var(x_values, na.rm = TRUE)
     y_intercept <-
       mean(y_values, na.rm = TRUE) - mean(x_values, na.rm = TRUE) * slope
-    label <-
-      sprintf(paste0("N: %d\n",
-                     "Slope: %0.2f\n",
-                     "Y-Intercept: %0.2f\n",
-                     "R2: %0.2f\n",
-                     "RMSE: %0.2f\n",
-                     "NRMSE: %0.2f%%\n",
-                     "NMBE: %0.2f%%"),
-             n, slope, y_intercept, r_squared, rmse, nrmse, nmbe)
+
+    if (is.null(r_squared_given)) {
+      # The input is corrected data so calculate the R2 based on type:
+
+      if (type == "Linear") {
+        regression_model <- lm(y_values ~ x_values)
+        r_squared <- summary(regression_model)$r.squared
+      } else if (type == "Quadratic") {
+        regression_model <- lm(y_values ~ x_values + I(x_values^2))
+        r_squared <- summary(regression_model)$r.squared
+      } else if (type == "Cubic") { # cubic
+        regression_model <- lm(y_values ~ x_values + I(x_values^2) + I(x_values^3))
+        r_squared <- summary(regression_model)$r.squared
+      } else {
+        r_squared <- 0.0
+
+        if (n > 1L) {
+          correlation <- cor(x_values, y_values)
+
+          if (!is.na(correlation)) {
+            r_squared <- correlation * correlation
+          }
+        }
+      }
+    } else {
+      r_squared <- r_squared_given
+    }
+
+    if (type == "default") {
+      label <-
+        sprintf(paste0("N: %d\n",
+                      "Slope: %0.2f\n",
+                      "Y-Intercept: %0.2f\n",
+                      "R2: %0.2f\n",
+                      "RMSE: %0.2f\n",
+                      "NRMSE: %0.2f%%\n",
+                      "NMBE: %0.2f%%"),
+              n, slope, y_intercept, r_squared, rmse, nrmse, nmbe)
+    } else {
+      label <-
+        sprintf(paste0("N: %d\n",
+                      "R2: %0.2f\n",
+                      "RMSE: %0.2f\n",
+                      "NRMSE: %0.2f%%\n",
+                      "NMBE: %0.2f%%"),
+              n, r_squared, rmse, nrmse, nmbe)
+
+    }
 
     # FIX: Replace R2 in stats_label with R-superscript-2:
     # https://www.statology.org/superscript-subscript-in-r/
@@ -7105,7 +7194,9 @@ server <- function(input, output, session) {
            has_flagged_points, point_colors,
            point_size = 4L,
            legend_label = NULL, labeled_legend_colormap = NULL,
-           data_legend_categories = NULL) {
+           data_legend_categories = NULL,
+           regression_linear = "default",
+           r_squared = NULL) {
 
     x_minimum <- min(x_values, na.rm = TRUE)
     x_maximum <- max(x_values, na.rm = TRUE)
@@ -7115,7 +7206,9 @@ server <- function(input, output, session) {
     y_range <- y_maximum - y_minimum
     stats_label_x <- x_minimum + x_range * 0.12
     stats_label_y <- y_minimum + y_range * 0.6
-    stats <- compute_scatterplot_stats(x_values, y_values, TRUE)
+    stats <- compute_scatterplot_stats(x_values, y_values, TRUE,
+                                       type = regression_linear,
+                                       r_squared_given = r_squared)
     stats_label <- stats$label
     slope <- stats$slope
     y_intercept <- stats$y_intercept
@@ -7161,16 +7254,22 @@ server <- function(input, output, session) {
                         line = list(color = "lightgray",
                                     dash = "dotted",
                                     width = 1L),
-                        name = "line y = x") %>%
-      plotly::add_trace(x = c(x_minimum, x_maximum),
-                        y = c(slope * x_minimum + y_intercept,
-                              slope * x_maximum + y_intercept),
-                        type = "scatter", mode = "lines",
-                        marker = NULL,
-                        line = list(color = "black",
-                                    dash = "dashed",
-                                    width = 1L),
-                        name = "regression line") %>%
+                        name = "line y = x")
+
+    if (regression_linear == "default") {
+      result <- result %>%
+        plotly::add_trace(x = c(x_minimum, x_maximum),
+                          y = c(slope * x_minimum + y_intercept,
+                                slope * x_maximum + y_intercept),
+                          type = "scatter", mode = "lines",
+                          marker = NULL,
+                          line = list(color = "black",
+                                      dash = "dashed",
+                                      width = 1L),
+                          name = "regression line")
+    }
+
+    result <- result %>%
       plotly::layout(annotations = list(text = stats_label,
                                         textposition = "top left",
                                         align = "left",
@@ -7199,8 +7298,7 @@ server <- function(input, output, session) {
 
   make_static_scatterplot <- function(plot_data, main_title, x_label, y_label,
                                       has_flagged_points, point_colors,
-                                      point_size = 2L) {
-
+                                      point_size = 2L, original = FALSE) {
     # Convert point_size to numeric
     point_size <- as.numeric(point_size)
     # Compute scatterplot stats per device_id
@@ -7218,27 +7316,22 @@ server <- function(input, output, session) {
       })
 
     # Create a data frame for lines per device
-    lines_data <- stats_df %>%
-      mutate(Type = "Regression Line") %>%
-      select(device_id, slope, y_intercept, Type)
-
     # Add y = x line
-    lines_data_yx <- data.frame(device_id = unique(plot_data$device_id),
+    lines_data <- data.frame(device_id = unique(plot_data$device_id),
                                 slope = 1,
                                 y_intercept = 0,
                                 Type = "y = x")
 
-    lines_data <- bind_rows(lines_data, lines_data_yx)
-
     # Base ggplot scatter plot
     p <- ggplot(plot_data, aes(x = x, y = y)) +
       geom_point(color = "blue", shape = 20, size = point_size) +
+      geom_abline(
+        data = lines_data,
+        aes(slope = slope, intercept = y_intercept, linetype = Type),
+        color = "black",
+        size = 0.7
+      ) +
       labs(title = main_title, x = x_label, y = y_label) +
-      geom_abline(data = lines_data,
-                  aes(slope = slope, intercept = y_intercept, linetype = Type),
-                  color = "black",
-                  size = 1) +
-      scale_linetype_manual(values = c("y = x" = "dotted", "Regression Line" = "solid")) +
       facet_wrap(~ device_id) +
       theme_minimal(base_size = 15) +
     theme(
@@ -7252,6 +7345,86 @@ server <- function(input, output, session) {
     )
 
 
+    # Create a grid of x values for a smooth line.
+    x_seq <- seq(min(plot_data$x), max(plot_data$x), length.out = 100)
+
+    if (original) {
+      gamma_model <- NULL
+
+      if (input$pre_regression_type == "multi_additive") {
+
+        if (input$regression_type == "Quadratic") {
+          # Quadratic additive gamma_model: y ~ x + x² + z
+          gamma_model <- gam(y ~ x + I(x^2) + z, data = plot_data)
+        } else if (input$regression_type == "Cubic") {
+          # Cubic additive gamma_model: y ~ x + x² + x³ + z
+          gamma_model <- gam(y ~ x + I(x^2) + I(x^3) + z, data = plot_data)
+          # gamma_model <- gam(y ~ s(x) + z, data = plot_data)
+        } else {
+          gamma_model <- gam(y ~ x + z, data = plot_data)
+        }
+
+        # Create a grid of x values for a smooth line.
+        new_data <- data.frame(x = x_seq, z = mean(plot_data$z))  # Use a typical z value.
+        # Predict on the new data.
+        new_data$result <- predict(gamma_model, newdata = new_data)
+        p <- p + geom_line(data = new_data,
+                           aes(x = x, y = result, linetype = "Regression Line"),
+                           color = "black", size = 1.5)
+
+      } else if (input$pre_regression_type == "multi_interactive") {
+
+        if (input$regression_type == "Quadratic") {
+          # Quadratic interactive gamma_model: y ~ (x + x²) * z
+          gamma_model <- gam(y ~ (x + I(x^2)) * z, data = plot_data)
+        } else if (input$regression_type == "Cubic") {
+          # Cubic interactive gamma_model: y ~ (x + x² + x³) * z
+          gamma_model <- gam(y ~ (x + I(x^2) + I(x^3)) * z, data = plot_data)
+        } else {
+          # Linear interactive model: y ~ x * z (includes x + z + x:z)
+          gamma_model <- gam(y ~ x * z, data = plot_data)
+        }
+
+        # Create a grid of x values for a smooth line.
+        new_data <- data.frame(x = x_seq, z = mean(plot_data$z))  # Use a typical z value.
+        # Predict on the new data.
+        new_data$result <- predict(gamma_model, newdata = new_data)
+        p <- p + geom_line(data = new_data,
+                           aes(x = x, y = result, linetype = "Regression Line"),
+                           color = "black", size = 1.5)
+      } else if (input$pre_regression_type == "single") {
+
+        if ( input$regression_type == "Quadratic") {
+          p <- p + stat_smooth(method = "lm",
+                              formula = y ~ poly(x, 2),
+                              se = FALSE,
+                              color = "black", linetype = "solid")
+        } else if (input$regression_type == "Cubic") {
+          p <- p + stat_smooth(method = "lm",
+                              formula = y ~ poly(x, 3),
+                              se = FALSE,
+                              color = "black", linetype = "solid")
+        } else {
+          p <- p + stat_smooth(method = "lm",
+                              formula = y ~ x,
+                              se = FALSE,
+                              color = "black", linetype = "solid")
+        }
+      }
+
+    } else {
+
+      # Create a grid of x values for a smooth line.
+      new_data <- data.frame(x = x_seq, z = mean(plot_data$z))  # Use a typical z value.
+      gamma_model <- gam(y ~ x, data = plot_data)
+      # Predict on the new data.
+      new_data$result <- predict(gamma_model, newdata = new_data)
+      p <- p + geom_line(data = new_data,
+                         aes(x = x, y = result, linetype = "Regression Line"),
+                         color = "black", size = 1.5)
+    }
+
+    p <- p + scale_linetype_manual(values = c("y = x" = "dotted", "Regression Line" = "solid"))
     # Add stats labels to each facet
     p <- p + geom_text(
       data = stats_df,
@@ -9495,35 +9668,65 @@ server <- function(input, output, session) {
 
   ####################### data correction and regression ######################
 
-  # Callback for Data Correction button:
   observeEvent(input$correction, {
+    # Show modal dialog first to get user selection
+    showModal(modalDialog(
+      title = "Select Regression Type",
+      helpText("Note: For multivariable regression options, please ensure variable Z is selected."),
+      radioButtons("pre_regression_type",
+                   "Regression Type:",
+                   choices = list(
+                     "Single Variable" = "single",
+                      "Multivariable Additive" = "multi_additive",
+                     "Multivariable Interactive" = "multi_interactive"
+                   ),
+                   selected = "single"),
+      selectInput("regression_type", "Select Regression Model",
+                  choices = c("Linear", "Quadratic", "Cubic")),
+      footer = tagList(
+        actionButton("proceed_correction", "Proceed"),
+        modalButton("Cancel")
+      ),
+      easyClose = TRUE
+    ))
+  })
 
-    shinyjs::show("data_correction_regression_layout")
-    shinyjs::hide("data_moving_average_layout")
+  # Callback for Data Correction proceed_correction button:
+  observeEvent(input$proceed_correction, {
+
+    removeModal()
+    multi <- ifelse(input$pre_regression_type == "multi_additive" || input$pre_regression_type == "multi_interactive", TRUE, FALSE)
+
     have <- have_datasets()
     have_x <- have$x
     have_y <- have$y
+    have_z <- have$z
 
     if (!have_x || !have_y) {
       showNotification("Please select X and Y variables to apply.", type = "warning")
       return(NULL)
     }
 
+    # Check for Z variable only if multivariable regression is selected
+    if (multi && !have_z) {
+      showNotification("Multivariable regression requires variable Z to be selected.", type = "error")
+      return(NULL)
+    }
+
     # Summarize and compare datasets
     summarize_and_compare_datasets_x_y()
 
-    max_distance <- maximum_neighbor_distance(model)
     # Get the comparison_r2_data_frame from the model
     comparison_r2_df <- comparison_r2_data_frame(model)
     summary_y <- summary_y_data_frame(model)
 
-    # Hide existing tables and plots
+    shinyjs::show("data_correction_regression_layout")
+    shinyjs::hide("data_moving_average_layout")
+
+    # Hide or show existing tables and plots
     if (nrow(comparison_r2_df) == 0) {
       shinyjs::hide("data_correction_regression_layout")
       return(NULL)
-    } else {
-      # Hide existing tables and plots
-      shinyjs::show("data_correction_regression_layout")
     }
 
     # Get the station pairs from summary_y
@@ -9548,19 +9751,23 @@ server <- function(input, output, session) {
     }
 
     # Reorder columns to swap AQS and PurpleAir related columns
-    comparison_r2_df <- comparison_r2_df[, c(
-      names(comparison_r2_df)[4],
-      names(comparison_r2_df)[5],
-      names(comparison_r2_df)[6],
-      names(comparison_r2_df)[8],
-      names(comparison_r2_df)[7],
-      names(comparison_r2_df)[1],
-      names(comparison_r2_df)[2],
-      names(comparison_r2_df)[3]
-    )]
+
+    comparison_r2_df <-
+      comparison_r2_df[, c(
+        names(comparison_r2_df)[4],
+        names(comparison_r2_df)[5],
+        names(comparison_r2_df)[6],
+        names(comparison_r2_df)[8],
+        names(comparison_r2_df)[7],
+        names(comparison_r2_df)[1],
+        names(comparison_r2_df)[2],
+        names(comparison_r2_df)[3]
+      )]
+
     filtered_comparison_df(comparison_r2_df)
 
     # Render the selectable correction table
+    max_distance <- maximum_neighbor_distance(model)
     output$selectable_correction_table <- DT::renderDataTable({
       DT::datatable(comparison_r2_df,
                     caption = paste("Neighboring Points ( <=", max_distance, "m)"),
@@ -9578,7 +9785,6 @@ server <- function(input, output, session) {
         DT::formatStyle(columns = c("Name", "Equation"),
                         cursor = "pointer")
     })
-
   })
 
 
@@ -9587,7 +9793,6 @@ server <- function(input, output, session) {
   # Apply the selected regression to correct the data
   observeEvent(input$apply_regression, {
     selected_rows <- 0
-
     # Check if the euqation is selected
     if (!is.null(input$equations_list_rows_selected)) {
       selected_rows <- input$equations_list_rows_selected
@@ -9600,7 +9805,6 @@ server <- function(input, output, session) {
       showNotification("Please select at least one equation to apply.", type = "warning")
       return()
     }
-
     eq_df <- equations_display_df()
     #  Example of eq_df
     #  Device_ID   Equation               R_Squared
@@ -9710,12 +9914,25 @@ server <- function(input, output, session) {
         y = y_values
       ))
 
-      plot_data_original <- rbind(plot_data_original, data.frame(
-        device_id = device_id,
-        x = x_values,
-        y = y_original
-      ))
-
+      # if multiple variable regression, add the z variable to the original data plot
+      if (input$pre_regression_type != "single") {
+        dataset_z_name <- strsplit(input$dataset_z_menu[1L], "\\.")[[1]][1]
+        independent_vars_z <- paste0(dataset_z_name, ".", input$dataset_z_variable_menu)
+        x2_values <- ifelse(is.na(filtered_data_y[[independent_vars_z]]), 0, filtered_data_y[[independent_vars_z]])
+        plot_data_original <- rbind(plot_data_original, data.frame(
+          device_id = device_id,
+          x = x_values,
+          y = y_original,
+          z = x2_values
+          # coef = correction_dictionary(model)[[device_id]]$coefficients
+        ))
+      } else {
+        plot_data_original <- rbind(plot_data_original, data.frame(
+          device_id = device_id,
+          x = x_values,
+          y = y_original
+        ))
+      }
     }
 
     if (length(plot_data_corrected) == 0 || length(plot_data_original) == 0) {
@@ -9725,7 +9942,6 @@ server <- function(input, output, session) {
 
     x_label <- independent_var_name
     y_label <- dependent_var_name
-
     # 10. Generate the interactive scatter plot
     scatter_plot_corrected_temp <- make_static_scatterplot(
         plot_data = plot_data_corrected,
@@ -9734,9 +9950,9 @@ server <- function(input, output, session) {
         y_label = y_label,
         has_flagged_points = has_flagged_points,
         point_colors = point_colors,
-        point_size = input$datapoint_size_select
+        point_size = input$datapoint_size_select,
+        original = FALSE
     )
-
     scatter_plot_original_temp <- make_static_scatterplot(
       plot_data = plot_data_original,
       main_title = main_title,
@@ -9744,7 +9960,8 @@ server <- function(input, output, session) {
       y_label = y_label,
       has_flagged_points = has_flagged_points,
       point_colors = point_colors,
-      point_size = input$datapoint_size_select
+      point_size = input$datapoint_size_select,
+      original = TRUE
     )
 
     # 11. Render the plot in original_scatter_plot
@@ -9770,14 +9987,16 @@ server <- function(input, output, session) {
 
     # Convert the selected device ID to an integer
     device_id <- as.integer(selected_device())
-
     # Retrieve the data for the selected device from the correction dictionary
     device_data <- correction_dictionary(model)[[device_id]]
-
 
     # Extract x values (original data) and y values (corrected data)
     x_values <- device_data$filtered_data_y[[device_data$independent_vars]]
     y_values <- device_data$calculated_values
+
+    coef <- device_data$coefficients
+    # Get regression type
+    regression_type <- input$regression_type
 
     lm_model <- lm(y_values ~ x_values)
     coefficients <- coef(lm_model)
@@ -9785,9 +10004,8 @@ server <- function(input, output, session) {
     # Generate equation string
     equation <- sprintf("y = %.8f + %.8fx", coefficients[1], coefficients[2])
 
-
     # Generate and return the interactive scatter plot
-    make_interactive_scatterplot(
+    p <- make_interactive_scatterplot(
       x_values = x_values,
       y_values = y_values,
       main_title = paste("Corrected Data for Device", device_id, "\n", equation),
@@ -9795,8 +10013,11 @@ server <- function(input, output, session) {
       y_label = device_data$dependent_var,
       has_flagged_points = FALSE,
       point_colors = "blue",
-      point_size = as.integer(input$datapoint_size_select) + 2L
+      point_size = as.integer(input$datapoint_size_select) + 2L,
+      r_squared = device_data$r_squared
     )
+
+    return(p)
   })
 
 
@@ -9808,23 +10029,87 @@ server <- function(input, output, session) {
 
     # Convert the selected device ID to an integer
     device_id <- as.integer(selected_device())
-
     # Retrieve the data for the selected device from the correction dictionary
     device_data <- correction_dictionary(model)[[device_id]]
-
     # Extract x and y values from the device data
     x_values <- device_data$filtered_data_y[[device_data$independent_vars]]
     y_values <- device_data$filtered_data_y[[device_data$dependent_var]]
 
-    lm_model <- lm(y_values ~ x_values)
-    coefficients <- coef(lm_model)
+    coef <- device_data$coefficients
+    # Get regression type
+    regression_type <- input$regression_type
+    multi <- input$pre_regression_type
 
-    # Generate equation string
-    equation <- sprintf("y = %.4f + %.4fx", coefficients[1], coefficients[2])
+    x_smooth <- seq(min(x_values), max(x_values), length.out = 100)
 
+    # Fit the appropriate regression model and get equation
+
+    if (input$pre_regression_type == "single") {
+
+      if (regression_type == "Quadratic") {
+        equation <- sprintf("y = %.4f + %.4fx + %.4fx²", coef[1], coef[2], coef[3])
+        y_smooth <- coef[1] + coef[2] * x_smooth + coef[3] * x_smooth^2
+      } else if (regression_type == "Cubic") {
+        equation <- sprintf("y = %.4f + %.4fx + %.4fx² + %.4fx³", coef[1], coef[2], coef[3], coef[4])
+        y_smooth <- coef[1] + coef[2] * x_smooth + coef[3] * x_smooth^2 + coef[4] * x_smooth^3
+      } else {
+        # Default to linear
+        equation <- sprintf("y = %.4f + %.4fx", coef[1], coef[2])
+        y_smooth <- coef[1] + coef[2] * x_smooth
+      }
+
+    } else {
+      dataset_z_name <- strsplit(input$dataset_z_menu[1L], "\\.")[[1]][1]
+      independent_vars_z <- paste0(dataset_z_name, ".", input$dataset_z_variable_menu)
+      x2_values <- ifelse(is.na(device_data$filtered_data_y[[independent_vars_z]]), 0, device_data$filtered_data_y[[independent_vars_z]])
+      #x2_fixed <- mean(x2_values)
+
+      plot_data <- data.frame(
+        x = device_data$filtered_data_y[[device_data$independent_vars]],
+        y = device_data$filtered_data_y[[device_data$dependent_var]],
+        z = x2_values
+      )
+
+      # Create a grid of x values for a smooth line.
+      new_data <- data.frame(x = x_smooth, z = mean(plot_data$z))
+
+      gamma_model <- NULL
+
+      if (input$pre_regression_type == "multi_additive") {
+
+        if (regression_type == "Quadratic") {
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2", coef[1], coef[2], coef[3], coef[4])
+          gamma_model <- gam(y ~ x + I(x^2) + z, data = plot_data)
+        } else if (regression_type == "Cubic") {
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx1^3 + %.4fx2", coef[1], coef[2], coef[3], coef[4], coef[5])
+          gamma_model <- gam(y ~ x + I(x^2) + I(x^3) + z, data = plot_data)
+        } else {
+          # Default to linear
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2", coef[1], coef[2], coef[3])
+          gamma_model <- gam(y ~ x + z, data = plot_data)
+        }
+
+      } else if (input$pre_regression_type == "multi_interactive") {
+
+        if (regression_type == "Quadratic") {
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2 + %.4fx1x2 + %.4fx1^2x2", coef[1], coef[2], coef[3], coef[4], coef[5], coef[6])
+          gamma_model <- gam(y ~ (x + I(x^2)) * z, data = plot_data)
+        } else if (regression_type == "Cubic") {
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx1^3 + %.4fx2 + %.4fx1x2 + %.4fx1^2x2 + %.4fx1^3x2", coef[1], coef[2], coef[3], coef[4], coef[5], coef[6], coef[7], coef[8])
+          gamma_model <- gam(y ~ (x + I(x^2) + I(x^3)) * z, data = plot_data)
+        } else {
+          # Default to linear
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2 + %.4fx1x2", coef[1], coef[2], coef[3], coef[4])
+          gamma_model <- gam(y ~ x * z, data = plot_data)
+        }
+
+      }
+
+      y_smooth <- predict(gamma_model, newdata = new_data)
+    }
 
     # Generate and return the interactive scatter plot
-    make_interactive_scatterplot(
+    p <- make_interactive_scatterplot(
       x_values = x_values,
       y_values = y_values,
       main_title = paste("Original Data for Device", device_id, "\n", equation),
@@ -9832,8 +10117,25 @@ server <- function(input, output, session) {
       y_label = device_data$dependent_var,
       has_flagged_points = FALSE,
       point_colors = "blue",
-      point_size = as.integer(input$datapoint_size_select) + 2L
+      point_size = as.integer(input$datapoint_size_select) + 2L,
+      regression_line = regression_type,
+      r_squared = device_data$r_squared
     )
+
+    # Add the regression curve to the plot
+    p <- p %>% add_trace(
+      x = x_smooth,
+      y = y_smooth,
+      type = "scatter",
+      mode = "lines",
+      line = list(color = "black", width = 2),
+      marker = list(opacity = 0),
+      hoverinfo = "none",  # Disable hover info to prevent selection of points
+      showlegend = TRUE,
+      name = paste(regression_type, "fit")
+    )
+
+    return(p)
   })
 
 
@@ -10057,10 +10359,10 @@ server <- function(input, output, session) {
   # observeEvent(input$regression_models_table_rows_selected, {
   #   selected_row <- input$regression_models_table_rows_selected
   #   if (length(selected_row) > 0) {
-  #     model <- regression_models()[selected_row, ]
+  #     regression_model <- regression_models()[selected_row, ]
   #     selected_model(selected_row)
-  #     updateTextInput(session, "custom_model_name", value = model$Name)
-  #     updateTextInput(session, "custom_model", value = model$Equation)
+  #     updateTextInput(session, "custom_model_name", value = regression_model$Name)
+  #     updateTextInput(session, "custom_model", value = regression_model$Equation)
   #   }
   # })
 
@@ -10179,11 +10481,7 @@ server <- function(input, output, session) {
 
   # Generate coefficients for the selected data entries
   observeEvent(input$generate_coefficients, {
-    # 1. Check if dependent and independent variables are selected
-    # if (is.null(selected_vars$dependent) || length(selected_vars$independent) == 0) {
-    #   showNotification("Please select both dependent and independent variables.", type = "warning")
-    #   return()
-    # }
+
 
     # 2. Check if rows are selected in the Neighboring Points table
     selected_rows <- input$selectable_correction_table_rows_selected
@@ -10192,72 +10490,273 @@ server <- function(input, output, session) {
       return()
     }
 
-    # print("selected_rows in coefficient")
-    # print(selected_rows)
 
     # 3. Get the selected data and extract dataset names and IDs
     selected_data <- filtered_comparison_df()[selected_rows, ]
 
-    # Extract dataset names from column names ( can potentially use dataset_coverages(model) to get names)
-    column_names <- colnames(selected_data)
-    dataset_names <- unique(sapply(strsplit(column_names[grepl("\\.", column_names)], "\\."), `[`, 1))
+    dataset_x_name <- sub("\\..*", "", input$dataset_x_menu[1L])
+    dataset_y_name <- sub("\\..*", "", input$dataset_y_menu[1L])
 
-    if (length(dataset_names) != 2) {
-      showNotification("Expected two distinct datasets, but found a different number.", type = "error")
-      return()
-    }
-
-    dataset_x_name <- dataset_names[2]
-    dataset_y_name <- dataset_names[1]
-
-
-    # Find the ID columns dynamically
-    id_column_x <- find_id_column(selected_data, dataset_x_name)
-    id_column_y <- find_id_column(selected_data, dataset_y_name)
-
-    if (is.null(id_column_x) || is.null(id_column_y)) {
-      showNotification("Could not find ID columns in the selected data.", type = "error")
-      return()
-    }
+    id_column_y <- paste0(dataset_y_name, ".id(-)")
 
     #selected_ids_x <- selected_data[[id_column_x]]
-    selected_ids_y <- selected_data[[id_column_y]]
+    #selected_ids_y <- selected_data[[id_column_y]]
 
     # 4. Retrieve full datasets and filter based on selected IDs
     full_data <- comparison_data_frame(model)
-
+    model_compare_frame <- comparison_r2_model_frame(model)
+    model_equation_list <- equation_list(model)
 
     display_equation <- list()
 
-    for (id in selected_ids_y) {
-      filtered_data_y <- full_data[full_data[[id_column_y]] %in% id, ]
+    for (i in 1:nrow(selected_data)) {
+      record <- selected_data[i, ]
+      id <- record[[1]]
+      x_id <- record[[6]]
 
-      # Ensure that the dependent variable is from dataset Y and independents from X
+      filtered_data_y <- full_data[full_data[[id_column_y]] %in% id, ]
+      min_size <- switch(input$regression_type,
+                         "Linear" = 20,
+                         "Quadratic" = 30, 
+                         "Cubic" = 40,
+                         15) # Default fallback
+
+      if (nrow(filtered_data_y) < min_size) {
+        showNotification(
+          paste0("Warning: Record number (", nrow(filtered_data_y),
+                ") for ID ", id, " is too small for ",
+                input$regression_type, " regression (recommended: ",
+                min_size, ")."),
+          type = "warning",
+          duration = 10
+        )
+        next  # Skip to the next iteration
+      }
+
+
+      # # Ensure that the dependent variable is from dataset Y and independents from X
       dependent_var <- paste0(dataset_y_name, ".", input$dataset_y_variable_menu)
       independent_vars <- paste0(dataset_x_name, ".", input$dataset_x_variable_menu)
 
+      row_num <- with(model_compare_frame, which(y_ids == id & x_ids == x_id ))
+
+      lm_model <- model_equation_list[[row_num]]
       # Perform regression based on the selected type
       tryCatch({
-        if (input$regression_type == "Linear") {
-          formula_str <- paste("`", dependent_var, "` ~ `", independent_vars, "`", sep = "")
-          formula <- as.formula(formula_str)
-          lm_model <- lm(formula, data = filtered_data_y)
-          coefficients <- coef(lm_model) # 1-Intercept, 2-slope
-          equation <- sprintf("y = %.4f + %.4fx", coefficients[1], coefficients[2])
+
+        if (input$pre_regression_type == "single") {
+
+          if (input$regression_type == "Linear") {
+
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope
+            equation <- sprintf("y = %.4f + %.4fx", coefficients[1], coefficients[2])
+            calibration_value <- round((filtered_data_y[[dependent_var]] - coefficients[1]) / coefficients[2], 4)
+          } else if (input$regression_type == "Quadratic") {
+
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
+            equation <- sprintf("y = %.4f + %.4fx + %.4fx^2", coefficients[1], coefficients[2], coefficients[3])
+
+            a <- coefficients[1]
+            b <- coefficients[2]
+            c <- coefficients[3]
+            y <- filtered_data_y[[dependent_var]]
+            actual_x <- filtered_data_y[[independent_vars]]
+
+            discriminant <- b^2 - 4*c*(a - y)
+
+            # Check discriminant to avoid NaNs
+            discriminant[discriminant < 0] <- NA
+
+            sqrt_discriminant <- sqrt(discriminant)
+
+            x1 <- (-b + sqrt_discriminant) / (2*c)
+            x2 <- (-b - sqrt_discriminant) / (2*c)
+
+            # Choose the root closest to actual_x
+           calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)          
+          
+          } else if (input$regression_type == "Cubic") {
+
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
+            equation <- sprintf("y = %.4f + %.4fx + %.4fx^2 + %.4fx^3", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
+
+
+            # Using numerical optimization to find x
+            actual_x <- filtered_data_y[[independent_vars]]
+            actual_y <- filtered_data_y[[dependent_var]]
+
+
+            # Define the cubic function
+            cubic_fn <- function(x, y) {
+              a <- coefficients[4]  # cubic coefficient
+              b <- coefficients[3]  # quadratic coefficient
+              c <- coefficients[2]  # linear coefficient
+              d <- coefficients[1]  # intercept
+
+              # Return the difference between predicted y and actual y
+              (a * x^3 + b * x^2 + c * x + d - y)^2
+            }
+
+            # Solve for each y value individually
+
+            calibration_value <- sapply(seq_along(actual_y), function(i) {
+              # Use the actual x as starting point for optimization
+              result <- optim(
+                par = actual_x[i],
+                fn = cubic_fn,
+                y = actual_y[i],
+                method = "BFGS"
+              )
+
+              round(result$par, 4)
+            })
+          }
+        } else if (input$pre_regression_type == "multi_additive") {
+          dataset_z_name <- strsplit(input$dataset_z_menu[1L], "\\.")[[1]][1]
+          independent_vars_z <- paste0(dataset_z_name, ".", input$dataset_z_variable_menu)
+          x2_values <- ifelse(is.na(filtered_data_y[[independent_vars_z]]), 0, filtered_data_y[[independent_vars_z]])
+
+          if (input$regression_type == "Linear") {
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope
+            equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2", coefficients[1], coefficients[2], coefficients[3])
+            # x2_values <- filtered_data_y[[independent_vars_z]]
+            calibration_value <- round((filtered_data_y[[dependent_var]] - coefficients[1] - coefficients[3] * x2_values) / coefficients[2], 4)
+
+          } else if (input$regression_type == "Quadratic") {
+
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
+            equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
+         
+            a <- coefficients[3]  # x1^2 coefficient
+            b <- coefficients[2]  # x1 coefficient
+            c <- coefficients[1] + coefficients[4] * x2_values - filtered_data_y[[dependent_var]]
+
+            actual_x <- filtered_data_y[[independent_vars]]
+            discriminant <- b^2 - 4*a*c
+            discriminant[discriminant < 0] <- NA
+
+            sqrt_discriminant <- sqrt(discriminant)
+            x1 <- (-b + sqrt_discriminant) / (2*a)
+            x2 <- (-b - sqrt_discriminant) / (2*a)
+
+            calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)
+
+          } else if (input$regression_type == "Cubic") {
+
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
+            equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx1^3 + %.4fx2", coefficients[1], coefficients[2], coefficients[3], coefficients[4], coefficients[5])
+            actual_x <- filtered_data_y[[independent_vars]]
+            actual_y <- filtered_data_y[[dependent_var]]
+
+            # Get values of x1, y, and the additional variable x2:
+            actual_x <- filtered_data_y[[independent_vars]]
+            actual_y <- filtered_data_y[[dependent_var]]
+
+            # Function to solve for x1 using the direct cubic root approach:
+            solve_cubic_x_multi <- function(y, x2, a, b, c, d, original_x) {
+              # The equation is: a * x^3 + b * x^2 + c * x + (d + coeff_x2 * x2 - y) = 0
+              # where:
+              #   a = coefficient for x1^3,
+              #   b = coefficient for x1^2,
+              #   c = coefficient for x1,
+              #   d = intercept,
+              #   coeff_x2 = coefficient for x2 (coefficients[5])
+              constant_term <- d + coefficients[5] * x2 - y
+              roots <- polyroot(c(constant_term, c, b, a))
+              real_roots <- Re(roots[abs(Im(roots)) < 1e-6])
+
+              if (length(real_roots) == 0) {
+                # No real roots found, so return NA
+                return(NA)
+              } else {
+                # Select the real root closest to the original x1 as reference
+                closest_root <- real_roots[which.min(abs(real_roots - original_x))]
+                return(round(closest_root, 4))
+              }
+            }
+
+            # Apply the function to all observations:
+            calibration_value <- sapply(seq_along(actual_y), function(i) {
+              solve_cubic_x_multi(
+                y = actual_y[i],
+                x2 = x2_values[i],
+                a = coefficients[4],
+                b = coefficients[3],
+                c = coefficients[2],
+                d = coefficients[1],
+                original_x = actual_x[i]
+              )
+            })
+          }
+
+        } else if (input$pre_regression_type == "multi_interactive") {
+          dataset_z_name <- strsplit(input$dataset_z_menu[1L], "\\.")[[1]][1]
+          independent_vars_z <- paste0(dataset_z_name, ".", input$dataset_z_variable_menu)
+          x2_values <- ifelse(is.na(filtered_data_y[[independent_vars_z]]), 0, filtered_data_y[[independent_vars_z]])
+
+          if (input$regression_type == "Linear") {
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope
+            equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2 + %.4fx1x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
+            # Solve: y = b0 + b2*x2 + x1*(b1+b3*x2)
+            # Rearranged: x1 = (y - b0 - b2*x2) / (b1 + b3*x2)
+            calibration_value <- round((filtered_data_y[[dependent_var]] - coefficients[1] - coefficients[3] * x2_values) / 
+                                        (coefficients[2] + coefficients[4] * x2_values), 4)       
+
+          } else if (input$regression_type == "Quadratic") {
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
+            equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2 + %.4fx1x2 + %.4fx1^2x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4], coefficients[5], coefficients[6])
+
+            # For quadratic interactive:
+            # Model: y = (b0 + b3*x2) + x1*(b1+b4*x2) + x1^2*(b2+b5*x2)
+            # Define quadratic coefficients based on x2:
+            a <- coefficients[3] + coefficients[6] * x2_values  # Coefficient for x1^2
+            b <- coefficients[2] + coefficients[5] * x2_values  # Coefficient for x1
+            c <- coefficients[1] + coefficients[4] * x2_values - filtered_data_y[[dependent_var]]
+
+            # Calculate discriminant
+            discriminant <- b^2 - 4 * a * c
+            # Avoid NaNs by handling negative discriminant
+            discriminant[discriminant < 0] <- NA
+            sqrt_discriminant <- sqrt(discriminant)
+
+            # Solve quadratic equation for x1
+            x1_sol1 <- (-b + sqrt_discriminant) / (2 * a)
+            x1_sol2 <- (-b - sqrt_discriminant) / (2 * a)
+            
+            # If an actual x1 value is available for guidance, use it to select the closer root.
+            actual_x1 <- filtered_data_y[[independent_vars]]
+            calibration_value <- round(ifelse(abs(x1_sol1 - actual_x1) < abs(x1_sol2 - actual_x1), x1_sol1, x1_sol2), 4)
+
+          } else if (input$regression_type == "Cubic") {
+
+            coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
+            equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx1^3 + %.4fx2 + %.4fx1x2 + %.4fx1^2x2 + %.4fx1^3x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4], coefficients[5], coefficients[6], coefficients[7], coefficients[8])
+
+            actual_x1 <- filtered_data_y[[independent_vars]]
+            actual_y <- filtered_data_y[[dependent_var]]
+            # Define a function for cubic interactive model:
+            # Model: y = (b0+b4*x2) + x1*(b1+b5*x2) + x1^2*(b2+b6*x2) + x1^3*(b3+b7*x2)
+            cubic_fn <- function(x, y, x2) {
+              # Build the calibration prediction based on x1 (x) and known x2
+              pred <- (coefficients[1] + coefficients[5] * x2) +
+                      (coefficients[2] + coefficients[6] * x2) * x +
+                      (coefficients[3] + coefficients[7] * x2) * x^2 +
+                      (coefficients[4] + coefficients[8] * x2) * x^3
+              (pred - y)^2  # squared error
+            }
+
+            # Solve for x1 using numeric optimization for each observation
+            calibration_value <- sapply(seq_along(actual_y), function(i) {
+              # Use the actual x1 as a starting point for optimization.
+              result <- optim(par = actual_x1[i],
+                              fn = cubic_fn,
+                              y = actual_y[i],
+                              x2 = x2_values[i],
+                              method = "BFGS")
+              round(result$par, 4)
+            })
+          }
         }
-        # else if (regression_type == "Polynomial") {
-        #   formula_str <- paste("`", dependent_var, "` ~ poly(`", independent_vars, "`, 2)", sep = "")
-        #   formula <- as.formula(formula_str)
-        #   model <- lm(formula, data = filtered_data_y)
-        #   coefficients <- coef(model)
-        #   equation <- sprintf("y = %.4f + %.4fx + %.4fx^2", coefficients[1], coefficients[2], coefficients[3])
-        # } else if (regression_type == "Exponential") {
-        #   formula_str <- paste("log(`", dependent_var, "`) ~ `", independent_vars, "`", sep = "")
-        #   formula <- as.formula(formula_str)
-        #   model <- lm(formula, data = filtered_data_y)
-        #   coefficients <- exp(coef(model))
-        #   equation <- sprintf("y = %.4f * exp(%.4fx)", coefficients[1], log(coefficients[2]))
-        # }
 
 
         # Create a list to store all the information for this ID
@@ -10287,14 +10786,14 @@ server <- function(input, output, session) {
           r_squared = summary(lm_model)$r.squared
         )
 
-
         # Generate the corrected dataset
         corrected_data <- list(
           filtered_data_y = filtered_data_y,
-          # calculated_values = round(coefficients[1] + coefficients[2] * filtered_data_y[[independent_vars]], 4),
-          calculated_values = round((filtered_data_y[[dependent_var]] - coefficients[1]) / coefficients[2], 4),
+          calculated_values = calibration_value,
           dependent_var = dependent_var,
-          independent_vars = independent_vars
+          independent_vars = independent_vars,
+          coefficients = coefficients,
+          r_squared = summary(lm_model)$r.squared
         )
 
         model <<- add_dataset_to_dictionary(model, id, corrected_data)
@@ -10337,7 +10836,6 @@ server <- function(input, output, session) {
           caption = "Regression Equations and Statistics",
           rownames = FALSE,
           selection = "multiple"
-
         )
       })
       showNotification("Regression coefficients generated successfully!", type = "message")
@@ -11643,14 +12141,22 @@ server <- function(input, output, session) {
 
     ## create time series plot
     timeseries <- ggplot(ts_dailymean_df, aes(x = date, y = mean)) +
-      {if (input$timestep_size == "hours") geom_line(data = ts_hourlymean_df, mapping = aes(x = date, y = mean), color = "gray65")} +
-      geom_point() +
-      geom_line() +
+      {if (input$timestep_size == "hours") geom_line(data = ts_hourlymean_df, mapping = aes(x = date, y = mean, color = "Hourly Average"))} +
+      geom_point(aes(color = "Daily Average"), size = 3) +
+      geom_line(aes(color = "Daily Average"), size = 1) +
+      # scale_x_datetime(
+      #   labels = scales::date_format("%Y-%m-%d"),
+      #   date_breaks = "1 day",
+      #   expand = c(0.01, 0)  # Minimal expansion
+      # ) +
       scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) +
+      scale_color_manual(name = "", 
+                values = c("Daily Average" = "black", "Hourly Average" = "gray65")) +
       xlab("") + ylab(value) +
       {if (polygon == TRUE) ggtitle(paste0(dataset_dropdown_txt(), " within GeoJSON"))} +
       {if (polygon == FALSE) ggtitle(paste0(dataset_dropdown_txt(), " all monitoring sites"))} +
-      theme_bw()
+      theme_bw() +
+      theme(legend.position = "top")
 
     return(timeseries)
   }
@@ -11739,17 +12245,68 @@ server <- function(input, output, session) {
       pol_var <- "mean"
     }
 
-    ## create calendar plot
-    calendarPlot <- openair::calendarPlot(
-      calendar_dailymean_df,
-      pollutant = pol_var,
-      #year = y,
-      annotate = calendar_val(),
-      cols = c("white", "#F80003"),
-      layout = c(4, 3),
-      remove.empty = FALSE
-      )
 
+    # Determine colors and appropriate limits based on AQI option
+    cols <- c("white", "#F80003")  # Default colors
+    limits <- NULL  # Default - no limits
+
+    # Check if we need to use AQI colors
+    use_aqi <- FALSE
+    var_name <- col_value_txt()
+
+    if ((calendar_val() == "value_aqi" || calendar_val() == "date_aqi") && grepl("pm25|pm10", tolower(var_name), ignore.case = TRUE)) {
+      use_aqi <- TRUE
+      # Determine which breakpoints to use
+      if (grepl("pm25", tolower(var_name), ignore.case = TRUE)) {
+        breakpoints <- ASNAT_pm25_daily_aqi_breakpoints_plots
+        label <- ASNAT_pm25_daily_aqi_breakpoints_labels
+      } else {
+        breakpoints <- ASNAT_pm10_daily_aqi_breakpoints_plots
+        label <- ASNAT_pm10_daily_aqi_breakpoints_labels
+      }
+
+      # Use AQI colors
+      cols <- ASNAT_aqi_colormap
+      limits <- breakpoints
+    }
+
+    ## create calendar plot
+    if (use_aqi && calendar_val() == "value_aqi") {
+      calendarPlot <- openair::calendarPlot(
+        calendar_dailymean_df,
+        pollutant = pol_var,
+        cols = cols,
+        layout = c(4, 3),
+        breaks = limits,
+        labels = label,
+        annotate = "value",
+        remove.empty = FALSE,
+        key.header = "AQI Category",
+        key.position = "right"
+      )
+    } else if  (use_aqi && calendar_val() == "date_aqi") {
+      calendarPlot <- openair::calendarPlot(
+        calendar_dailymean_df,
+        pollutant = pol_var,
+        cols = cols,
+        layout = c(4, 3),
+        breaks = limits,
+        annotate = "date",
+        remove.empty = FALSE,
+        key.header = "AQI Category",
+        key.position = "right"
+      )
+    } else {
+      calendarPlot <- openair::calendarPlot(
+        calendar_dailymean_df,
+        pollutant = pol_var,
+        #year = y,
+        annotate = gsub("_aqi", "", calendar_val()),
+        cols = c("white", "#F80003"),
+        layout = c(4, 3),
+        remove.empty = FALSE
+        )
+    }
     return(calendarPlot)
   }
 
@@ -11846,14 +12403,58 @@ server <- function(input, output, session) {
     ## make sure date column is a date object
     calendar_dailymean_df$date <- as.Date(calendar_dailymean_df$date)
 
+    calculate_aqi <- FALSE
+    var_name <- col_value_txt()
+    # Check AQI colors 
+    if ((input$calendar_sel == "value_aqi" || input$calendar_sel == "date_aqi") && grepl("pm25|pm10", tolower(var_name))) {
+      calculate_aqi <- TRUE
+      # Determine which breakpoints to use
+      if (grepl("pm25", tolower(var_name))) {
+        breakpoints <- ASNAT_pm25_daily_aqi_breakpoints
+      } else {
+        breakpoints <- ASNAT_pm10_daily_aqi_breakpoints
+      }
+      # Calculate AQI category for each value
+      calendar_dailymean_df$aqi_category <- cut(
+        calendar_dailymean_df$mean,
+        c(-Inf, breakpoints),
+        labels = ASNAT_aqi_names
+      )
+      
+      # Convert to factor with correct levels for proper ordering
+      calendar_dailymean_df$aqi_category <- factor(
+        calendar_dailymean_df$aqi_category,
+        levels = ASNAT_aqi_names
+      )
+      
+      # Map categories to numerical indices for plotting
+      calendar_dailymean_df$aqi_index <- as.integer(calendar_dailymean_df$aqi_category)
+    }
     ## create calendar plot
+    if (calculate_aqi) {
+      # AQI-colored plot
+      plot <- ggTimeSeries::ggplot_calendar_heatmap(calendar_dailymean_df, "date", "aqi_index") +
+        scale_fill_gradientn(
+          colors = ASNAT_aqi_colormap,
+          breaks = 1:6,
+          labels = ASNAT_aqi_names,
+          name = "Air Quality",
+          limits = c(1, 6)
+        ) +
+        xlab("") + ylab("") +
+        {if (polygon == TRUE) ggtitle(paste0(dataset_dropdown_txt(), " AQI within GeoJSON"))} +
+        {if (polygon == FALSE) ggtitle(paste0(dataset_dropdown_txt(), " AQI - all monitoring sites"))} +
+        facet_wrap(~Year, ncol = 1) +
+        theme_bw()
+    } else {
+    # Standard continuous plot
     plot <- ggTimeSeries::ggplot_calendar_heatmap(calendar_dailymean_df, "date", "mean") +
       scale_fill_continuous(low = "white", high = "#F80003") +
       xlab("") + ylab("") +
       {if (polygon == TRUE) ggtitle(paste0(dataset_dropdown_txt(), " within GeoJSON"))} +
       {if (polygon == FALSE) ggtitle(paste0(dataset_dropdown_txt(), " all monitoring sites"))} +
       facet_wrap(~Year, ncol = 1)
-
+    }
     return(plot)
   }
 

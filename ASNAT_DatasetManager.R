@@ -234,7 +234,7 @@ function(object) {
 
 # Change timeout_seconds:
 # Example change to 0 which waits indefinitely:
-# timeout_seconds(dataset_manager) <- 0L
+# timeout_seconds(dataset_manager) <<- 0L
 
 ASNAT_declare_method("ASNAT_DatasetManager", "timeout_seconds<-",
 function(object, value) {
@@ -254,7 +254,7 @@ function(object, value) {
 #   cat("url =", url, "coverage =", coverage, percent_done, "% done\n")
 # }
 #
-# set_retrieving_url_callback(dataset_manager) <- my_callback
+# set_retrieving_url_callback(dataset_manager) <<- my_callback
 
 ASNAT_declare_method("ASNAT_DatasetManager", "set_retrieving_url_callback<-",
 function(object, value) {
@@ -621,7 +621,7 @@ function(object,
 
           # Validate the final data_frame before storing it:
 
-          data_frame<- ASNAT_validate_input_data_frame(data_frame)
+          data_frame <- ASNAT_validate_input_data_frame(data_frame)
 
           if (!is.null(data_frame)) {
 
@@ -688,56 +688,54 @@ function(object,
 #                             "my-valid-purple-air-api-read-key")
 
 ASNAT_declare_method("ASNAT_DatasetManager", "retrieve_purple_air_sites",
-function(object, start_date) {
+function(object, start_date, key) {
   ASNAT_dprint("In retrieve_purple_air_sites()\n")
   ASNAT_check(methods::validObject(object))
   stopifnot(class(start_date) == "Date")
+  stopifnot(class(key) == "character")
 
   result <- data.frame()
-  object@ok <- FALSE
-  object@retrieved_urls <- vector()
-  retrieved_days_count <- 0L
 
-  the_date <- start_date
-  yesterday <- Sys.Date() - 1L
+  if (ASNAT_is_conforming_purple_air_key(key)) {
+    the_date <- start_date
+    yesterday <- Sys.Date() - 1L
 
-  if (the_date >= yesterday) {
-    the_date <- yesterday - 1L
-  }
+    if (the_date >= yesterday) {
+      the_date <- yesterday - 1L
+    }
 
-  yyyy_mm_dd <- format(the_date, "%Y-%m-%d")
-  time_option <- paste0(yyyy_mm_dd, "T00:00:00Z")
+    yyyy_mm_dd <- format(the_date, "%Y-%m-%d")
+    time_option <- paste0(yyyy_mm_dd, "T00:00:00Z")
 
-  url <- paste0(rsigserver_url,
-                "SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage",
-                "&FORMAT=ascii",
-                "&COVERAGE=PurpleAir.sites",
-                "&BBOX=-180,-90,180,90",
-                "&OUT_IN_FLAG=0",
-                "&KEY=EPA",
-                "&TIME=",
-                time_option)
+    url <- paste0(rsigserver_url,
+                  "SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage",
+                  "&FORMAT=ascii",
+                  "&COVERAGE=PurpleAir.sites",
+                  "&BBOX=-180,-90,180,90",
+                  "&OUT_IN_FLAG=0",
+                  "&KEY=",
+                  key,
+                  "&TIME=",
+                  time_option)
 
-  file_name <- paste0(object@data_directory, "/PurpleAirSites.txt")
-  ok <- ASNAT_http_get(url, object@timeout_seconds, file_name)
+    file_name <- paste0(object@data_directory, "/PurpleAirSites.txt")
+    ok <- ASNAT_http_get(url, object@timeout_seconds, file_name)
 
-  if (ok) {
+    if (ok) {
 
-    # File is tab-delimited and the first line is a header that looks like:
-    # longitude(deg)	latitude(deg)	id(-)	note(-)
+      # File is tab-delimited and the first line is a header that looks like:
+      # longitude(deg)	latitude(deg)	id(-)	note(-)
 
-    result <-
-      try(silent = TRUE,
-          read.delim(sep = "\t", check.names = FALSE, strip.white = TRUE,
-                     file_name))
-    unlink(file_name)
+      result <-
+        try(silent = TRUE,
+            read.delim(sep = "\t", check.names = FALSE, strip.white = TRUE,
+                       file_name))
+      unlink(file_name)
+      ok <- class(result) == "data.frame" && nrow(result) > 0L
 
-    if (class(result) == "data.frame" && nrow(result) > 0L) {
-      retrieved_days_count <- 1L
-      object@retrieved_urls[retrieved_days_count] <- url
-      object@ok <- TRUE
-    } else {
-      result <- data.frame()
+      if (!ok) {
+        result <- data.frame()
+      }
     }
   }
 
@@ -774,7 +772,7 @@ function(object, data_frame, aggregate, name) {
   if (length(object@datasets) > 0L) {
     the_coverages <- dataset_coverages(object)
     the_parts <- unlist(strsplit(the_coverages, ".", fixed = TRUE))
-    the_names <- the_parts[seq(length(the_parts)) %% 2L == 1L]
+    the_names <- the_parts[seq_along(the_parts) %% 2L == 1L]
 
     name_i <- name
     matches <- which(the_names == name_i)

@@ -81,12 +81,12 @@ if (!ASNAT_use_curl_program) {
 # However, functions such as min(), max(), mean(), var(), quantile(), etc.
 # must then include argument na.rm = TRUE to avoid numeric/plot problems.
 
-ASNAT_na_strings =
+ASNAT_na_strings <-
   c("", "''", "NA", "NaN", "nan", "-9999", "-9999.0", "-Inf", "Inf")
 
 # When ASNAT outputs data to a file, any NA values are converted to this:
 
-ASNAT_output_missing_string = "-9999.0"
+ASNAT_output_missing_string <- "-9999.0"
 
 
 # Print debug messages to stderr and perform extra checks?
@@ -230,7 +230,8 @@ ASNAT_aqi_names <- c("Good", "Moderate", "Unhealthy for some", "Unhealthy",
 
 # Workaround BUG: Use "#00FF00" for green else "green" appears as "green4".
 
-ASNAT_aqi_colormap <- c("#00FF00", "yellow", "orange", "red", "purple", "maroon")
+ASNAT_aqi_colormap <-
+  c("#00FF00", "yellow", "orange", "red", "purple", "maroon")
 
 # pm25(ug/m3), ozone(ppm):
 
@@ -241,6 +242,34 @@ ASNAT_ozone_1_hour_aqi_breakpoints <- c(0.124, 0.124, 0.164, 0.204, 0.404, 1e3)
 ASNAT_ozone_8_hour_aqi_breakpoints <- ASNAT_ozone_8_hour_aqi_breakpoints * 1000
 ASNAT_ozone_1_hour_aqi_breakpoints <- ASNAT_ozone_1_hour_aqi_breakpoints * 1000
 
+# Create more plot breakpoints/labels based on the above values:
+
+ASNAT_pm25_daily_aqi_breakpoints_plots <- c(0, ASNAT_pm25_daily_aqi_breakpoints)
+ASNAT_pm10_daily_aqi_breakpoints_plots <- c(0, ASNAT_pm10_daily_aqi_breakpoints)
+
+ASNAT_pm25_daily_aqi_breakpoints_labels <-
+  rep("", length(ASNAT_pm25_daily_aqi_breakpoints_plots) - 1L)
+
+ASNAT_pm10_daily_aqi_breakpoints_labels <-
+  rep("", length(ASNAT_pm10_daily_aqi_breakpoints_plots) - 1L)
+
+for (.i in seq_along(ASNAT_pm25_daily_aqi_breakpoints_labels)) {
+  ASNAT_pm25_daily_aqi_breakpoints_labels[.i] <-
+    paste0(ASNAT_pm25_daily_aqi_breakpoints_plots[.i], " - ",
+           ASNAT_pm25_daily_aqi_breakpoints_plots[.i + 1])
+}
+
+for (.i in seq_along(ASNAT_pm10_daily_aqi_breakpoints_labels)) {
+  ASNAT_pm10_daily_aqi_breakpoints_labels[.i] <-
+    paste0(ASNAT_pm10_daily_aqi_breakpoints_plots[.i], " - ",
+           ASNAT_pm10_daily_aqi_breakpoints_plots[.i + 1])
+}
+
+ASNAT_pm25_daily_aqi_breakpoints_labels[[length(ASNAT_pm25_daily_aqi_breakpoints_labels)]] <-
+  paste0("> ", as.character(ASNAT_pm25_daily_aqi_breakpoints[[length(ASNAT_pm25_daily_aqi_breakpoints) - 1L]]))
+
+ASNAT_pm10_daily_aqi_breakpoints_labels[[length(ASNAT_pm10_daily_aqi_breakpoints_labels)]] <-
+  paste0("> ", as.character(ASNAT_pm10_daily_aqi_breakpoints[[length(ASNAT_pm10_daily_aqi_breakpoints) - 1L]]))
 
 
 # Get AQI statistics target ranges
@@ -460,6 +489,7 @@ ASNAT_aqi_data_colors <- function(values, breakpoints, colormap) {
     value <- values[[index]]
 
     # Skip NA values - assign a default color
+
     if (is.na(value)) {
       result[[index]] <- "#858585"
       next
@@ -723,7 +753,7 @@ function(variable, is_hourly, measures_x, measures_y) {
 
 
 
-# Return data.frame of neighbor statistics:
+# Return data.frame of neighbor statistics for each pair of neighboring sites:
 
 ASNAT_neighbor_statistics <- function(neighbors_data_frame, only_unflagged) {
   ASNAT_dprint("ASNAT_neighbor_statistics():")
@@ -732,70 +762,113 @@ ASNAT_neighbor_statistics <- function(neighbors_data_frame, only_unflagged) {
   stopifnot(nrow(neighbors_data_frame) > 0L)
   stopifnot(only_unflagged == TRUE || only_unflagged == FALSE)
 
+  result <- NULL
+
   sites_x <- as.integer(neighbors_data_frame[[2L]])
   unique_sites_x <- unique(sort.int(sites_x))
-  count <- length(unique_sites_x)
+  sites_y <- as.integer(neighbors_data_frame[[4L]])
+  unique_sites_y <- unique(sort.int(sites_y))
+  flagged_y <- neighbors_data_frame[[6L]]
+  measures_x <- neighbors_data_frame[[3L]]
+  measures_y <- neighbors_data_frame[[5L]]
 
-  result <- data.frame(site = rep(0L, count),
-                       R2 = rep(NA, count),
-                       slope = rep(NA, count),
-                       intercept = rep(NA, count),
-                       RMSE = rep(NA, count),
-                       NRMSE = rep(NA, count))
+  # Compute number of paired neighbor sites:
 
-  for (index in 1L:count) {
-    site_x <- unique_sites_x[[index]]
-    neighbor_indices <- NULL
+  count <- 0L
 
-    if (only_unflagged) {
-      neighbor_indices <-
-        which(neighbors_data_frame[[2L]] == site_x &
-              neighbors_data_frame[[6L]] == "0")
-    } else {
-      neighbor_indices <- which(neighbors_data_frame[[2L]] == site_x)
-    }
+  for (site_x in unique_sites_x) {
 
-    n <- length(neighbor_indices)
+    for (site_y in unique_sites_y) {
 
-    if (n > 0L) {
-      measures_x <- neighbors_data_frame[neighbor_indices, 3L]
-      measures_y <- neighbors_data_frame[neighbor_indices, 5L]
-      correlation <- if (n > 1L) cor(measures_x, measures_y) else 0.0
-
-      if (is.na(correlation)) {
-        correlation <- 0.0
+      if (only_unflagged) {
+        paired_sites_rows <-
+          which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+      } else {
+        paired_sites_rows <-
+          which(sites_x == site_x & sites_y == site_y)
       }
 
-      r_squared <- correlation * correlation
-      slope <- cov(measures_x, measures_y) / var(measures_x, na.rm = TRUE)
-      y_intercept <-
-        mean(measures_y, na.rm = TRUE) - mean(measures_x, na.rm = TRUE) * slope
-      err <- measures_x - measures_y
-      se <- err * err
-      mse <- mean(se, na.rm = TRUE)
-      rmse <- sqrt(mse)
-      mean_measures_x <- mean(measures_x, na.rm = TRUE)
-      nrmse <- rmse / mean_measures_x * 100.0
-      result[index, ] <-
-        c(site_x, r_squared, slope, y_intercept, rmse, nrmse)
+      n <- length(paired_sites_rows)
+
+      if (n > 0L) {
+        count <- count + 1L
+      }
     }
   }
 
-  valid_rows <- which(result[[1L]] > 0L)
-  count <- length(valid_rows)
+  if (count > 0L) {
 
-  if (count == 0L) {
-    result <- NULL
-  } else {
-    result <- result[valid_rows, ]
+    # Allocate result data.frame:
+
+    result <- data.frame(site = rep(0L, count),
+                         R2 = rep(NA, count),
+                         slope = rep(NA, count),
+                         intercept = rep(NA, count),
+                         RMSE = rep(NA, count),
+                         NRMSE = rep(NA, count))
+
+    index <- 0L
+
+    for (site_x in unique_sites_x) {
+
+      for (site_y in unique_sites_y) {
+
+        if (only_unflagged) {
+          paired_sites_rows <-
+            which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+        } else {
+          paired_sites_rows <-
+            which(sites_x == site_x & sites_y == site_y)
+        }
+
+        n <- length(paired_sites_rows)
+
+        if (n > 0L) {
+
+          # Compute statistics of neighbor pair time-matched measures:
+
+          site_measures_x <- measures_x[paired_sites_rows]
+          site_measures_y <- measures_y[paired_sites_rows]
+          correlation <- 0.0
+
+          if (n > 1L) {
+            correlation <- cor(site_measures_x, site_measures_y)
+
+            if (is.na(correlation)) {
+              correlation <- 0.0
+            }
+          }
+
+          r_squared <- correlation * correlation
+          slope <- cov(site_measures_x, site_measures_y) /
+                   var(site_measures_x, na.rm = TRUE)
+          y_intercept <-
+            mean(site_measures_y, na.rm = TRUE) -
+            mean(site_measures_x, na.rm = TRUE) * slope
+          err <- site_measures_x - site_measures_y
+          se <- err * err
+          mse <- mean(se, na.rm = TRUE)
+          rmse <- sqrt(mse)
+          mean_measures_x <- mean(site_measures_x, na.rm = TRUE)
+          nrmse <- rmse / mean_measures_x * 100.0
+
+          # Store row of statistics:
+
+          index <- index + 1L
+          result[index, ] <-
+            c(site_x, r_squared, slope, y_intercept, rmse, nrmse)
+        }
+      }
+    }
+
     column_names <- colnames(neighbors_data_frame)
     variable <- column_names[[3L]]
     parts <- unlist(strsplit(variable, "[()]"))
     units <- parts[[2L]]
-    intercept_column <- sprintf("Intercept(%s)", units)
-    rmse_column <- sprintf("RMSE(%s)", units)
+    intercept_header <- sprintf("Intercept(%s)", units)
+    rmse_header <- sprintf("RMSE(%s)", units)
     colnames(result) <-
-      c("Site(-)", "R2(-)", "Slope(-)", intercept_column, rmse_column,
+      c("Site(-)", "R2(-)", "Slope(-)", intercept_header, rmse_header,
         "NRMSE(%)")
   }
 
@@ -1197,8 +1270,10 @@ ASNAT_clear_flagged_column <- function(data_frame, keep_99) {
 # Include flag in a sorted unique semi-colon-separated string of flag integers:
 
 ASNAT_include_flag <- function(flagged, flag) {
-  stopifnot(flag >= 0L)
-  stopifnot(flag <= 99L)
+  stopifnot(grepl("^[0-9]+$", flag))
+  stopifnot(length(flag) == 1L)
+  stopifnot(as.integer(flag) >= 1L)
+  stopifnot(as.integer(flag) <= 99L)
   stopifnot(nchar(flagged) >= 1L)
 
   if (flagged == 0L) {
@@ -1223,8 +1298,10 @@ ASNAT_include_flag <- function(flagged, flag) {
 # Exclude flag in a sorted unique semi-colon-separated string of flag integers:
 
 ASNAT_exclude_flag <- function(flagged, flag) {
-  stopifnot(flag >= 1L)
-  stopifnot(flag <= 99L)
+  stopifnot(grepl("^[0-9]+$", flag))
+  stopifnot(length(flag) == 1L)
+  stopifnot(as.integer(flag) >= 1L)
+  stopifnot(as.integer(flag) <= 99L)
   stopifnot(nchar(flagged) >= 1L)
 
   if (flagged != 0L) {
@@ -1875,14 +1952,14 @@ function(timestamps, measures_x, measures_y, sites_y, flagged_y,
       stopifnot(length(site_measures_y) == sample_size)
 
       if (sample_size > 1L) {
-        r <- cor(site_measures_x, site_measures_y)
+        correlation <- cor(site_measures_x, site_measures_y)
 
-        if (!is.na(r) && r > 0.0) {
-          r_squared <- r * r
+        if (!is.na(correlation)) {
+          r_squared <- correlation * correlation
         }
       }
 
-      if (! is.na(r_squared) && r_squared < minimum_r_squared) {
+      if (!is.na(r_squared) && r_squared < minimum_r_squared) {
         flagged_y[site_rows] <-
           vapply(flagged_y[site_rows], ASNAT_include_flag,
                  c(""), 82L, USE.NAMES = FALSE)
@@ -2701,8 +2778,7 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
   # Note: a vector (unlike a data.frame) must be sorted for unique to work.
 
   site_ids <- data_frame[[site_column]]
-  site_ids <- sort.int(site_ids)
-  site_ids <- unique(site_ids)
+  unique_site_ids <- unique(sort.int(site_ids))
 
   # If comparing to data_frame2 then create sorted vectors of unique
   # site_ids2, longitudes2, latitudes2 for data_frame2.
@@ -2720,13 +2796,13 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
     latitudes2 <- subset_data_frame2[[3L]]
   }
 
-  for (site_id in site_ids) {
+  for (site_id in unique_site_ids) {
 
     # NOTE: PROFILE HOTSPOT:
-    # The cummulative runtime of the call to the built-in function 'which()'
+    # The cummulative runtime of the calls to the built-in function 'which()'
     # on the line below is 90% of the total runtime of this function.
 
-    site_rows <- which(data_frame[[site_column]] == site_id)
+    site_rows <- which(site_ids == site_id)
 
     site_data_frame <- data_frame[site_rows, ]
 
@@ -2929,7 +3005,7 @@ ASNAT_validate_input_data_frame <- function(data_frame) {
       } else if (column_names[[3L]] != "latitude(deg)") {
         failure <- "column 3 is not 'latitude(deg)'.\n"
       } else if (column_names[[4L]] == "elevation(m)") {
-        elevation_column = 4L
+        elevation_column <- 4L
         id_column <- 5L
       }
 
@@ -3049,7 +3125,7 @@ ASNAT_validate_input_data_frame <- function(data_frame) {
                           } else if (mm == 2L) {
                             is_leap_year <-
                               yyyy %% 4L == 0L &&
-                              ! ( yyyy %% 100L == 0L && yyyy %% 400L != 0L )
+                              ! (yyyy %% 100L == 0L && yyyy %% 400L != 0L)
 
                             if (is_leap_year) {
                               ok <- dd <= 29L
@@ -3364,7 +3440,8 @@ ASNAT_aggregate <- function(data_frame, aggregate) {
 
     for (timestamp in timestamps) {
       aggregate_row_values[1L, 1L] <- paste0(timestamp, timestamp_suffix)
-      timestamp_rows <- which(startsWith(matched_id_data_frame[[1L]], timestamp))
+      timestamp_rows <-
+        which(startsWith(matched_id_data_frame[[1L]], timestamp))
       matched_timestamp_data_frame <- matched_id_data_frame[timestamp_rows, ]
       numeric_data_frame <- matched_timestamp_data_frame[, numeric_columns]
 

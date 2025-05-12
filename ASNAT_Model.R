@@ -108,13 +108,16 @@ methods::setClass(
    comparison_r2_title = "character", # May be empty if not summarized.
    comparison_r2_subtitle = "character", # May be empty if not summarized.
    comparison_r2_data_frame = "data.frame", # May be empty if not summarized.
+   comparison_r2_model_frame = "data.frame", # May be empty if not summarized.
+   equation_list = "list", # May be empty if not summarized.
    aqi_statistics_file_name = "character", # May be empty if not summarized.
    aqi_statistics_title = "character", # May be empty if not summarized.
    aqi_statistics_subtitle = "character", # May be empty if not summarized.
    aqi_statistics_data_frame = "data.frame", # May be empty if not summarized.
    saved_files = "vector", # Vector of files last saved.
    id_equations = "list",  # New slot to store equations for each ID
-   correction_dictionary = "list"  # New slot to store correction dataset
+   correction_dictionary = "list",  # New slot to store correction dataset
+   correction_selection = "integer" # New slot to store correction selection 0 for none, 1 for linear, 2 for quadratic, 3 for cubic
 ))
 
 
@@ -340,6 +343,7 @@ function(data_subdirectory = NULL) {
   apply_daily_pattern_o3 <- FALSE
   apply_daily_pattern_pm <- FALSE
   apply_format_check_flag <- FALSE
+  correction_selection <- 0L
 
   # Read state file:
 
@@ -614,7 +618,7 @@ function(data_subdirectory = NULL) {
     ASNAT_DatasetManager(app_directory, data_subdirectory)
 
   purple_air_sites_data_frame <-
-    retrieve_purple_air_sites(dataset_manager, start_date)
+    retrieve_purple_air_sites(dataset_manager, start_date, purple_air_key)
 
   object <- new("ASNAT_Model",
                 app_directory = app_directory,
@@ -667,6 +671,7 @@ function(data_subdirectory = NULL) {
                 hampel_filter_window = hampel_filter_window,
                 spike_threshold = spike_threshold,
                 spike_time_window = spike_time_window,
+                correction_selection = correction_selection,
                 drop_threshold = drop_threshold,
                 drop_time_window = drop_time_window,
                 constant_value_threshold = constant_value_threshold,
@@ -692,6 +697,8 @@ function(data_subdirectory = NULL) {
                 comparison_r2_title = "",
                 comparison_r2_subtitle = "",
                 comparison_r2_data_frame = data.frame(),
+                comparison_r2_model_frame = data.frame(),
+                equation_list = list(),
                 aqi_statistics_file_name = "",
                 aqi_statistics_title = "",
                 aqi_statistics_subtitle = "",
@@ -884,6 +891,8 @@ function(object) object@id_equations)
 ASNAT_declare_method("ASNAT_Model", "correction_dictionary",
 function(object) object@correction_dictionary)
 
+ASNAT_declare_method("ASNAT_Model", "correction_selection",
+function(object) object@correction_selection)
 
 
 # Queries:
@@ -1151,6 +1160,14 @@ function(object) object@comparison_r2_subtitle)
 ASNAT_declare_method("ASNAT_Model", "comparison_r2_data_frame",
 function(object) object@comparison_r2_data_frame)
 
+# Get data_frame of model if compared:
+ASNAT_declare_method("ASNAT_Model", "comparison_r2_model_frame",
+function(object) object@comparison_r2_model_frame)
+
+# Get list of equations if compared:
+ASNAT_declare_method("ASNAT_Model", "equation_list",
+function(object) object@equation_list)
+
 # Get file name of aqi_statistics if compared:
 
 ASNAT_declare_method("ASNAT_Model", "aqi_statistics_file_name",
@@ -1176,6 +1193,24 @@ function(object) object@aqi_statistics_data_frame)
 ASNAT_declare_method("ASNAT_Model", "download_url",
 function(object) download_url(object@dataset_manager))
 
+
+# What version of ASNAT are we running?
+
+ASNAT_declare_method("ASNAT_Model", "version",
+function(object) {
+  program_name <- paste0(object@app_directory, "/app.R")
+  file_timestamp <- file.mtime(program_name)
+  result <- as.integer(strftime(file_timestamp, format = "%Y%m%d", tz = "UTC"))
+  return(result)
+})
+
+
+# What version of ASNAT is available on rsigserver?
+
+ASNAT_declare_method("ASNAT_Model", "public_version",
+function(object) current_version(object@dataset_manager))
+
+
 # Is there a newer version of ASNAT available for download?
 
 ASNAT_declare_method("ASNAT_Model", "is_newer_version_available",
@@ -1183,17 +1218,15 @@ function(object) {
 
   # If ASNAT is deployed as a remote hosted client-server app then
   # the user is accessing the current version.
-  # Otherwise if ASNAT is deployed as a local app then compare the ASNAT file
-  # timestamp vs the remote version.
+  # Otherwise if ASNAT is deployed as a local app then compare the version
+  # vs the public version.
 
   if (ASNAT_is_remote_hosted) {
     result <- FALSE
   } else {
-    program_name <- paste0(object@app_directory, "/app.R")
-    time_1 <- file.mtime(program_name)
-    yyyymmdd_1 <- as.integer(strftime(time_1, format = "%Y%m%d", tz = "UTC"))
-    yyyymmdd_0 <- current_version(object@dataset_manager)
-    result <- yyyymmdd_0 > yyyymmdd_1
+    this_version <- version(object)
+    the_public_version <- public_version(object)
+    result <- the_public_version > this_version
   }
 
   return(result)
@@ -1205,7 +1238,8 @@ function(object) {
 
 # Change output directory:
 # Example change to subdirectory tmp:
-# output_directory(asnat_model) <- paste0(output_directory(asnat_model), "/tmp")
+# output_directory(asnat_model) <<-
+#   paste0(output_directory(asnat_model), "/tmp")
 
 ASNAT_declare_method("ASNAT_Model", "output_directory<-",
 function(object, value) {
@@ -1221,7 +1255,7 @@ function(object, value) {
 
 # Change output format:
 # Example:
-# output_format(asnat_model) <- "csv"
+# output_format(asnat_model) <<- "csv"
 
 ASNAT_declare_method("ASNAT_Model", "output_format<-",
 function(object, value) {
@@ -1237,7 +1271,7 @@ function(object, value) {
 
 
 # Change start_date:
-# Example change start_date to today: start_date(asnat_model) <- Sys.Date())
+# Example change start_date to today: start_date(asnat_model) <<- Sys.Date())
 
 ASNAT_declare_method("ASNAT_Model", "start_date<-",
 function(object, value) {
@@ -1252,7 +1286,7 @@ function(object, value) {
 
 
 # Change days:
-#   days(asnat_model) <- 7L
+#   days(asnat_model) <<- 7L
 
 ASNAT_declare_method("ASNAT_Model", "days<-",
 function(object, value) {
@@ -1276,7 +1310,7 @@ function(object, value) {
 
 
 # Change timestep_size:
-# Example timestep_size(asnat_model) <- "days"
+# Example timestep_size(asnat_model) <<- "days"
 # Also resets timestep to 0 to ensure it is within valid range.
 
 ASNAT_declare_method("ASNAT_Model", "timestep_size<-",
@@ -1294,7 +1328,7 @@ function(object, value) {
 
 
 # Change timestep:
-# Example timestep(asnat_model) <- 2L
+# Example timestep(asnat_model) <<- 2L
 
 ASNAT_declare_method("ASNAT_Model", "timestep<-",
 function(object, value) {
@@ -1313,7 +1347,7 @@ function(object, value) {
 
 
 # Change west_bound:
-# Example: west_bound(asnat_model) <- -74.1
+# Example: west_bound(asnat_model) <<- -74.1
 
 ASNAT_declare_method("ASNAT_Model", "west_bound<-",
 function(object, value) {
@@ -1334,7 +1368,7 @@ function(object, value) {
 
 
 # Change east_bound:
-# Example: east_bound(asnat_model) <- -73.9
+# Example: east_bound(asnat_model) <<- -73.9
 
 ASNAT_declare_method("ASNAT_Model", "east_bound<-",
 function(object, value) {
@@ -1355,7 +1389,7 @@ function(object, value) {
 
 
 # Change south_bound:
-# Example: south_bound(asnat_model) <- 40.7
+# Example: south_bound(asnat_model) <<- 40.7
 
 ASNAT_declare_method("ASNAT_Model", "south_bound<-",
 function(object, value) {
@@ -1376,7 +1410,7 @@ function(object, value) {
 
 
 # Change north_bound:
-# Example: north_bound(asnat_model) <- 40.8
+# Example: north_bound(asnat_model) <<- 40.8
 
 ASNAT_declare_method("ASNAT_Model", "north_bound<-",
 function(object, value) {
@@ -1397,15 +1431,25 @@ function(object, value) {
 
 
 # Change purple_air_key:
-# Example: purple_air_key(asnat_model) <- my_purple_air_key
+# Example: purple_air_key(asnat_model) <<- my_purple_air_key
 
 ASNAT_declare_method("ASNAT_Model", "purple_air_key<-",
 function(object, value) {
   ASNAT_check(methods::validObject(object))
   stopifnot(class(value) == "character")
   stopifnot(length(grep("[ ]", value)) == 0L)
-  object@purple_air_key <- value
-  object@ok <- TRUE
+  object@ok <- FALSE
+
+  if (ASNAT_is_conforming_purple_air_key(value)) {
+    object@purple_air_key <- value
+
+    object@purple_air_sites_data_frame <-
+      retrieve_purple_air_sites(object@dataset_manager, object@start_date,
+                                object@purple_air_key)
+
+    object@ok <- nrow(object@purple_air_sites_data_frame) > 0L
+  }
+
   ASNAT_check(methods::validObject(object))
   return(object)
 })
@@ -1413,7 +1457,7 @@ function(object, value) {
 
 
 # Change purple_air_sensor:
-# Example: purple_air_sensor(asnat_model) <- my_purple_air_sensor
+# Example: purple_air_sensor(asnat_model) <<- my_purple_air_sensor
 
 ASNAT_declare_method("ASNAT_Model", "purple_air_sensor<-",
 function(object, value) {
@@ -1429,7 +1473,7 @@ function(object, value) {
 
 
 # Change aqs_pm25_codes:
-# Example: aqs_pm25_codes(asnat_model) <- aqs_pm25_codes
+# Example: aqs_pm25_codes(asnat_model) <<- aqs_pm25_codes
 
 ASNAT_declare_method("ASNAT_Model", "aqs_pm25_codes<-",
 function(object, value) {
@@ -1445,7 +1489,7 @@ function(object, value) {
 
 
 # Change legend_colormap:
-# Example: legend_colormap(asnat_model) <- TRUE
+# Example: legend_colormap(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "legend_colormap<-",
 function(object, value) {
@@ -1465,7 +1509,7 @@ function(object, value) {
 
 
 # Change show_mean_values_on_map:
-# Example: show_mean_values_on_map(asnat_model) <- TRUE
+# Example: show_mean_values_on_map(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "show_mean_values_on_map<-",
 function(object, value) {
@@ -1480,7 +1524,7 @@ function(object, value) {
 
 
 # Change use_fancy_labels:
-# Example: use_fancy_labels(asnat_model) <- TRUE
+# Example: use_fancy_labels(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "use_fancy_labels<-",
 function(object, value) {
@@ -1495,7 +1539,7 @@ function(object, value) {
 
 
 # Change use_interactive_plots:
-# Example: use_interactive_plots(asnat_model) <- TRUE
+# Example: use_interactive_plots(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "use_interactive_plots<-",
 function(object, value) {
@@ -1510,7 +1554,7 @@ function(object, value) {
 
 
 # Change show_site_labels:
-# Example: show_site_labels(asnat_model) <- TRUE
+# Example: show_site_labels(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "show_site_labels<-",
 function(object, value) {
@@ -1525,7 +1569,7 @@ function(object, value) {
 
 
 # Change maximum_neighbor_distance:
-# Example: maximum_neighbor_distance(asnat_model) <- 500.0
+# Example: maximum_neighbor_distance(asnat_model) <<- 500.0
 
 ASNAT_declare_method("ASNAT_Model", "maximum_neighbor_distance<-",
 function(object, value) {
@@ -1541,7 +1585,7 @@ function(object, value) {
 
 
 # Change apply_max_neighbor_value_diff:
-# Example: apply_max_neighbor_value_diff(asnat_model) <- TRUE
+# Example: apply_max_neighbor_value_diff(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_max_neighbor_value_diff<-",
 function(object, value) {
@@ -1556,10 +1600,9 @@ function(object, value) {
 
 
 # Change apply_max_neighbor_val_pdiff:
-# Example: apply_max_neighbor_val_pdiff(asnat_model) <- TRUE
+# Example: apply_max_neighbor_val_pdiff(asnat_model) <<- TRUE
 
-ASNAT_declare_method("ASNAT_Model",
-                     "apply_max_neighbor_val_pdiff<-",
+ASNAT_declare_method("ASNAT_Model", "apply_max_neighbor_val_pdiff<-",
 function(object, value) {
   ASNAT_check(methods::validObject(object))
   stopifnot(value == TRUE || value == FALSE)
@@ -1572,7 +1615,7 @@ function(object, value) {
 
 
 # Change apply_min_neighbor_value_r2:
-# Example: apply_min_neighbor_value_r2(asnat_model) <- TRUE
+# Example: apply_min_neighbor_value_r2(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_min_neighbor_value_r2<-",
 function(object, value) {
@@ -1587,7 +1630,7 @@ function(object, value) {
 
 
 # Change max_neighbor_value_diff:
-# Example: max_neighbor_value_diff(asnat_model) <- 5.0
+# Example: max_neighbor_value_diff(asnat_model) <<- 5.0
 
 ASNAT_declare_method("ASNAT_Model", "max_neighbor_value_diff<-",
 function(object, value) {
@@ -1603,10 +1646,9 @@ function(object, value) {
 
 
 # Change max_neighbor_value_percent_diff:
-# Example: max_neighbor_value_percent_diff(asnat_model) <- 70.0
+# Example: max_neighbor_value_percent_diff(asnat_model) <<- 70.0
 
-ASNAT_declare_method("ASNAT_Model",
-                     "max_neighbor_value_pdiff<-",
+ASNAT_declare_method("ASNAT_Model", "max_neighbor_value_pdiff<-",
 function(object, value) {
   ASNAT_check(methods::validObject(object))
   stopifnot(value >= 0.0)
@@ -1620,7 +1662,7 @@ function(object, value) {
 
 
 # Change min_neighbor_value_r2:
-# Example: min_neighbor_value_r2(asnat_model) <- 5.0
+# Example: min_neighbor_value_r2(asnat_model) <<- 5.0
 
 ASNAT_declare_method("ASNAT_Model", "min_neighbor_value_r2<-",
 function(object, value) {
@@ -1672,7 +1714,7 @@ function(object, dataset_index, flagged) {
 
 
 # Set apply_constant_value_flag:
-# Example: apply_constant_value_flag(asnat_model) <- TRUE
+# Example: apply_constant_value_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_constant_value_flag<-",
 function(object, value) {
@@ -1687,7 +1729,7 @@ function(object, value) {
 
 
 # Set apply_negtive_value_flag:
-# Example: apply_negtive_value_flag(asnat_model) <- TRUE
+# Example: apply_negtive_value_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_negtive_value_flag<-",
 function(object, value) {
@@ -1702,7 +1744,7 @@ function(object, value) {
 
 
 # Set apply_daily_pattern_pm:
-# Example: apply_daily_pattern_pm(asnat_model) <- TRUE
+# Example: apply_daily_pattern_pm(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_daily_pattern_pm<-",
 function(object, value) {
@@ -1717,7 +1759,7 @@ function(object, value) {
 
 
 # Set apply_daily_pattern_o3:
-# Example: apply_daily_pattern_o3(asnat_model) <- TRUE
+# Example: apply_daily_pattern_o3(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_daily_pattern_o3<-",
 function(object, value) {
@@ -1732,7 +1774,7 @@ function(object, value) {
 
 
 # Set apply_sudden_drop_flag:
-# Example: apply_sudden_drop_flag(asnat_model) <- TRUE
+# Example: apply_sudden_drop_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_sudden_drop_flag<-",
 function(object, value) {
@@ -1747,7 +1789,7 @@ function(object, value) {
 
 
 # Set apply_redundancy_check_flag:
-# Example: apply_redundancy_check_flag(asnat_model) <- TRUE
+# Example: apply_redundancy_check_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_redundancy_check_flag<-",
 function(object, value) {
@@ -1762,7 +1804,7 @@ function(object, value) {
 
 
 # Set apply_format_check_flag:
-# Example: apply_format_check_flag(asnat_model) <- TRUE
+# Example: apply_format_check_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_format_check_flag<-",
 function(object, value) {
@@ -1777,7 +1819,7 @@ function(object, value) {
 
 
 # Set apply_sudden_spike_flag:
-# Example: apply_sudden_spike_flag(asnat_model) <- TRUE
+# Example: apply_sudden_spike_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_sudden_spike_flag<-",
 function(object, value) {
@@ -1792,7 +1834,7 @@ function(object, value) {
 
 
 # Set apply_date_validation_flag:
-# Example: apply_date_validation_flag(asnat_model) <- TRUE
+# Example: apply_date_validation_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_date_validation_flag<-",
 function(object, value) {
@@ -1807,7 +1849,7 @@ function(object, value) {
 
 
 # Set apply_hampel_filter_flag:
-# Example: apply_hampel_filter_flag(asnat_model) <- TRUE
+# Example: apply_hampel_filter_flag(asnat_model) <<- TRUE
 
 ASNAT_declare_method("ASNAT_Model", "apply_hampel_filter_flag<-",
 function(object, value) {
@@ -2000,6 +2042,19 @@ function(object, value) {
 
 
 
+ASNAT_declare_method("ASNAT_Model", "correction_selection<-",
+function(object, value) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(class(value) == "numeric" || class(value) == "integer")
+  stopifnot(as.integer(value) >= 0L)
+  stopifnot(as.integer(value) <= 3L)
+  object@correction_selection <- value
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
 # Set optional callback function to be called before each webservice retrieval.
 # Example:
 #
@@ -2007,7 +2062,7 @@ function(object, value) {
 #   cat("url =", url, "coverage = ", coverage, percent_done, "% done\n")
 # }
 #
-# set_retrieving_url_callback(asnat_model) <- my_callback
+# set_retrieving_url_callback(asnat_model) <<- my_callback
 
 ASNAT_declare_method("ASNAT_Model", "set_retrieving_url_callback<-",
 function(object, value) {
@@ -2023,7 +2078,7 @@ function(object, value) {
 
 
 # delete_datasets: delete any loaded datasets:
-# Example asnat_model <- delete_datasets(asnat_model):
+# Example asnat_model <<- delete_datasets(asnat_model):
 
 ASNAT_declare_method("ASNAT_Model", "delete_datasets",
 function(object) {
@@ -2054,6 +2109,8 @@ function(object) {
   object@comparison_r2_title <- ""
   object@comparison_r2_subtitle <- ""
   object@comparison_r2_data_frame <- data.frame()
+  object@comparison_r2_model_frame <- data.frame()
+  object@equation_list <- list()
 
   object@aqi_statistics_file_name <- ""
   object@aqi_statistics_title <- ""
@@ -2191,7 +2248,7 @@ function(object, key, dataset_index) {
 # dataset_flag_index - the index of the dataset to be processed
 # selected_flag_variable - the variable to be processed
 # Example
-#  asnat_model <-
+#  asnat_model <<-
 #    process_flaggings(asnat_model, dataset_flag_index, selected_flag_variable):
 
 ASNAT_declare_method("ASNAT_Model", "process_flaggings",
@@ -2275,7 +2332,7 @@ function(object, dataset_flag_index, selected_flag_variable) {
 
 # delete_dataset_summaries:
 # Example
-# asnat_model <- delete_dataset_summaries(asnat_model):
+# asnat_model <<- delete_dataset_summaries(asnat_model):
 
 ASNAT_declare_method("ASNAT_Model", "delete_dataset_summaries",
 function(object) {
@@ -2317,6 +2374,8 @@ function(object) {
   object@comparison_r2_title <- ""
   object@comparison_r2_subtitle <- ""
   object@comparison_r2_data_frame <- data.frame()
+  object@comparison_r2_model_frame <- data.frame()
+  object@equation_list <- list()
   object@aqi_statistics_file_name <- ""
   object@aqi_statistics_title <- ""
   object@aqi_statistics_subtitle <- ""
@@ -2330,7 +2389,7 @@ function(object) {
 
 # summarize_datasets:
 # Example
-#  asnat_model <-
+#  asnat_model <<-
 #    summarize_datasets(asnat_model, dataset_x_name, "pm25(ug/m3)",
 #                       dataset_y_name, "pm25_corrected(ug/m3)"):
 
@@ -2455,7 +2514,7 @@ function(object, dataset_x_name, dataset_x_variable,
 
 
 # compare_datasets:
-# Example asnat_model <-
+# Example asnat_model <<-
 #    compare_datasets(asnat_model, dataset_x_name, "pm25(ug/m3)",
 #                     dataset_y_name, "pm25_corrected(ug/m3)"):
 # Note: optional dataset_z source (e.g., AQS, PurpleAir) must match
@@ -2464,7 +2523,9 @@ function(object, dataset_x_name, dataset_x_variable,
 ASNAT_declare_method("ASNAT_Model", "compare_datasets",
 function(object, dataset_x_name, dataset_x_variable,
          dataset_y_name, dataset_y_variable,
-         dataset_z_name = NULL, dataset_z_variable = NULL) {
+         dataset_z_name = NULL, dataset_z_variable = NULL,
+         regression_method = NULL ) {
+
   timer <- ASNAT_start_timer()
   ASNAT_check(methods::validObject(object))
   stopifnot(!is.null(dataset_x_name))
@@ -2491,6 +2552,8 @@ function(object, dataset_x_name, dataset_x_variable,
   object@comparison_r2_subtitle <- ""
   object@comparison_r2_file_name <- ""
   object@comparison_r2_data_frame <- data.frame()
+  object@comparison_r2_model_frame <- data.frame()
+  object@equation_list <- list()
   object@aqi_statistics_title <- ""
   object@aqi_statistics_subtitle <- ""
   object@aqi_statistics_file_name <- ""
@@ -2574,6 +2637,30 @@ function(object, dataset_x_name, dataset_x_variable,
     x_label <- paste0(source_variable_x, "(", units_x, ")")
     y_label <- paste0(source_variable_y, "(", units_y, ")")
 
+
+    # Before (re)computing neighbor flags, clear dataset_y of neighbor flags
+    # that may have been previously computed by ASNAT_flag_y_neighbors().
+    # This is necessary to make this function idempotent.
+
+    flagged_column_y <- ASNAT_flagged_column_index(column_names_y)
+    flagged_y <- data_frame_y[[flagged_column_y]]
+    flagged_y <- vapply(flagged_y, ASNAT_exclude_flag,
+                        c(""), 80L, USE.NAMES = FALSE)
+    flagged_y <- vapply(flagged_y, ASNAT_exclude_flag,
+                        c(""), 81L, USE.NAMES = FALSE)
+    flagged_y <- vapply(flagged_y, ASNAT_exclude_flag,
+                        c(""), 82L, USE.NAMES = FALSE)
+    data_frame_y[flagged_column_y] <- flagged_y
+
+    # Update stored dataset_y with modified data_frame_y:
+
+    object@dataset_manager <-
+      replace_flagged_column_values(object@dataset_manager,
+                                    dataset_index_y,
+                                    data_frame_y[[flagged_column_y]])
+
+    # Compute neighbor indices (expensive):
+
     is_hourly <- object@timestep_size == "hours"
 
     x_y_indices <-
@@ -2585,6 +2672,7 @@ function(object, dataset_x_name, dataset_x_variable,
 
     if (length(indices_x) > 0L) {
       timestamps_x <- data_frame_x[indices_x, 1L]
+      timestamps_y <- data_frame_y[indices_y, 1L]
       measures_x <- data_frame_x[indices_x, measure_column_x]
       measures_y <- data_frame_y[indices_y, measure_column_y]
       site_column_x <- ASNAT_site_column_index(column_names_x)
@@ -2600,7 +2688,6 @@ function(object, dataset_x_name, dataset_x_variable,
       x_id_label <- paste0(coverage_source_dataset_x, ".id(-)")
       y_id_label <- paste0(coverage_source_dataset_y, ".id(-)")
       y_flagged_label <- paste0(coverage_source_dataset_y, ".flagged(-)")
-      flagged_column_y <- ASNAT_flagged_column_index(column_names_y)
       flagged_y <- data_frame_y[indices_y, flagged_column_y]
 
       maximum_difference <-
@@ -2624,9 +2711,33 @@ function(object, dataset_x_name, dataset_x_variable,
 
       if (flagged_result$updated) {
 
-        # Update data_frame_y flagged column values:
+        # Note a dataset_y measure can have multiple dataset_x neighbor measures
+        # and the dataset_y measure can have multiple flags
+        # (because multiple dataset_x neighbor measures have different values)
+        # so update dataset_y flagged column with all of the (non-0) flags.
+        # E.g., if 2 AQS points have values 1.0 and 2.0 and a single PurpleAir
+        # neighbor measure with value 7.0 and we're flagging 80 if > 5 (ug/m3)
+        # then the PurpleAir neighbor would have flag 80 from the first
+        # AQS measure but flag 0 from the second AQS measure.
+        # So which flag to store?
+        # Answer: 80 because we want to indicate that the PurpeAir measure
+        # differs by more than 5 (ug/m3) from at least one neighbor AQS measure.
 
-        data_frame_y[indices_y, flagged_column_y] <- flagged_y
+        for (flag_index in seq_along(indices_y)) {
+          flags_y_string <- flagged_y[[flag_index]]
+
+          if (flags_y_string != "0") {
+            flags_y_vector <- unlist(strsplit(flags_y_string, ";"))
+
+            for (flag in flags_y_vector) {
+              neighbor_flag_index <- indices_y[[flag_index]]
+              current_flags <-
+                data_frame_y[neighbor_flag_index, flagged_column_y]
+              new_flags <- ASNAT_include_flag(current_flags, flag)
+              data_frame_y[neighbor_flag_index, flagged_column_y] <- new_flags
+            }
+          }
+        }
 
         # Update stored dataset_y with modified data_frame_y:
 
@@ -2650,11 +2761,18 @@ function(object, dataset_x_name, dataset_x_variable,
         source_z <- coverage_source(dataset_z)
 
         match_sites <- NULL
+        timestamp_length <- 13L
+
+        if (object@timestep_size == "days") {
+          timestamp_length <- 10L
+        }
 
         if (source_z == source_x) {
           match_sites <- sites_x
+          match_timestamps <- substr(timestamps_x, 1L, timestamp_length)
         } else if (source_z == source_y) {
           match_sites <- sites_y
+          match_timestamps <- substr(timestamps_y, 1L, timestamp_length)
         }
 
         if (!is.null(match_sites)) {
@@ -2672,29 +2790,27 @@ function(object, dataset_x_name, dataset_x_variable,
           measure_column_z <- variable_column(dataset_z)
           site_column_z <- ASNAT_site_column_index(column_names_z)
           timestamps_z <- data_frame_z[, 1L]
-          timestamp_length <- 13L
-
-          if (object@timestep_size == "days") {
-            timestamp_length <- 10L
-          }
 
           timestamps_z <- substr(timestamps_z, 1L, timestamp_length)
-          match_timestamps <- substr(timestamps_x, 1L, timestamp_length)
+          
           sites_z <- as.integer(data_frame_z[, site_column_z])
           measures_z <- data_frame_z[, measure_column_z]
-          count <- length(sites_x)
+          count <- length(match_sites)
           matched_measures_z <- rep(NA, count)
+          sites_z_matched <- rep(NA, count)
+          longitudes_z <- data_frame_z[, 2L]
+          latitudes_z <- data_frame_z[, 3L]
 
           for (row in 1L:count) {
             timestamp <- match_timestamps[[row]]
             site <- match_sites[[row]]
-
             matched_rows <-
               which(timestamps_z == timestamp & sites_z == site)
 
             if (length(matched_rows) > 0L) {
               row_index <- matched_rows[[1L]]
               matched_measures_z[[row]] <- measures_z[[row_index]]
+              sites_z_matched[[row]] <- sites_z[[row_index]]
             }
           }
         }
@@ -2744,69 +2860,220 @@ function(object, dataset_x_name, dataset_x_variable,
         object@ok <- TRUE
       }
 
-      # Also, compute and write comparison_r2 file:
+      # Also, compute and write comparison_r2 table/file of unflagged measures:
 
       if (object@ok) {
         object@ok <- FALSE
         unique_sites_x <- unique(sort.int(sites_x))
         unique_sites_y <- unique(sort.int(sites_y))
+
+        # Compute number of paired sites:
+
+        count <- 0L
+
+        for (site_x in unique_sites_x) {
+
+          for (site_y in unique_sites_y) {
+            paired_sites_rows <-
+                which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+
+            n <- length(paired_sites_rows)
+
+            if (n > 0L) {
+              count <- count + 1L
+            }
+          }
+        }
+
+        # Allocate vector outputs:
+
+        x_ids <- rep(0L, count)
+        x_longitudes <- rep(NA, count)
+        x_latitudes <- rep(NA, count)
+        y_ids <- rep(0L, count)
+        y_longitudes <- rep(NA, count)
+        y_latitudes <- rep(NA, count)
+        distances <- rep(NA, count)
+        r2s <- rep(NA, count)
+        equations <- rep(NULL, count)
+
+        if (!is.null(matched_measures_z)) {
+          z_ids <- rep(0L, count)
+          z_longitudes <- rep(NA, count)
+          z_latitudes <- rep(NA, count)
+          z_distances <- rep(NA, count)
+        }
+
+        quadratic_regression <- FALSE
+        cubic_regression <- FALSE
+
+        if (!is.null(regression_method)) {
+
+          if (regression_method == "Quadratic") {
+            quadratic_regression <- TRUE
+          } else if (regression_method == "Cubic") {
+            cubic_regression <- TRUE
+          }
+        }
+
         index <- 0L
-        x_ids <- NULL
-        x_longitudes <- NULL
-        x_latitudes <- NULL
-        y_ids <- NULL
-        y_longitudes <- NULL
-        y_latitudes <- NULL
-        distances <- NULL
-        r2s <- NULL
 
-        for (site_y in unique_sites_y) {
+        # Data rows will be sorted by X sites:
 
-          for (site_x in unique_sites_x) {
-            site_rows <-
-              which(sites_y == site_y &
-                    sites_x == site_x &
-                    flagged_y == "0")
+        for (site_x in unique_sites_x) {
 
-            if (length(site_rows) > 0L) {
-              site_measures_x <- measures_x[site_rows]
-              site_measures_y <- measures_y[site_rows]
-              r_squared <- 0.0
-              sample_size <- length(site_measures_x)
+          for (site_y in unique_sites_y) {
 
-              if (sample_size > 1L) {
-                r <- cor(site_measures_x, site_measures_y)
+            # if single variable regression
+            if (object@correction_selection == 0L) {
+              site_rows <-
+                which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
 
-                if (!is.na(r) && r > 0.0) {
-                  r_squared <- r * r
+              if (length(site_rows) > 0L) {
+                site_measures_x <- measures_x[site_rows]
+                site_measures_y <- measures_y[site_rows]
+                r_squared <- 0.0
+                lm_model <- list()
+                sample_size <- length(site_measures_x)
+
+                if (sample_size > 1L) {
+
+                  if (quadratic_regression) {
+                    lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2))
+                    r_squared <- summary(lm_model)$r.squared
+                  } else if (cubic_regression) {
+                    # For cubic R-squared
+                    lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2) + I(site_measures_x^3))
+                    r_squared <- summary(lm_model)$r.squared
+                  } else {
+                    lm_model <- lm(site_measures_y ~ site_measures_x)
+                    r_squared <- summary(lm_model)$r.squared
+                  }
                 }
+
+                # Compute column values:
+
+                site_longitudes_x <- longitudes_x[site_rows]
+                site_latitudes_x <- latitudes_x[site_rows]
+                site_longitudes_y <- longitudes_y[site_rows]
+                site_latitudes_y <- latitudes_y[site_rows]
+                longitude_x <- site_longitudes_x[[1L]]
+                latitude_x <- site_latitudes_x[[1L]]
+                longitude_y <- site_longitudes_y[[1L]]
+                latitude_y <- site_latitudes_y[[1L]]
+                distance <-
+                  ASNAT_distance_meters(longitude_x, latitude_x,
+                                        longitude_y, latitude_y)
+
+                # Store column values:
+
+                index <- index + 1L
+                x_ids[[index]] <- as.integer(site_x)
+                x_longitudes[[index]] <- longitude_x
+                x_latitudes[[index]] <- latitude_x
+                y_ids[[index]] <- as.integer(site_y)
+                y_longitudes[[index]] <- longitude_y
+                y_latitudes[[index]] <- latitude_y
+                distances[[index]] <- distance
+                r2s[[index]] <- r_squared
+                equations[[index]] <- lm_model
               }
 
-              # Compute column values:
+            } else if (!is.null(matched_measures_z)) {
+              # multiple variable regression and matched_measures_z exists
+              coverage_source_dataset_z <- coverage_source(dataset_z)
+              z_id_label <- paste0(coverage_source_dataset_z, ".id(-)_z")
+              # object@correction_selection == 1 or 2
+              # object@correction_selection == 1 is additive
+              # object@correction_selection == 2 is interactive
 
-              site_longitudes_x <- longitudes_x[site_rows]
-              site_latitudes_x <- latitudes_x[site_rows]
-              site_longitudes_y <- longitudes_y[site_rows]
-              site_latitudes_y <- latitudes_y[site_rows]
-              longitude_x <- site_longitudes_x[[1L]]
-              latitude_x <- site_latitudes_x[[1L]]
-              longitude_y <- site_longitudes_y[[1L]]
-              latitude_y <- site_latitudes_y[[1L]]
-              distance <-
-                ASNAT_distance_meters(longitude_x, latitude_x,
-                                      longitude_y, latitude_y)
+              site_rows <-
+                which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
 
-              # Store column values:
+              if (length(site_rows) > 0L &&
+                  sum(!is.na(measures_x[site_rows])) /
+                  length(measures_x[site_rows]) >= 0.5 &&
+                  sum(!is.na(measures_y[site_rows])) /
+                  length(measures_y[site_rows]) >= 0.5 &&
+                  sum(!is.na(matched_measures_z[site_rows])) /
+                  length(matched_measures_z[site_rows]) >= 0.5) {
 
-              index <- index + 1L
-              x_ids[[index]] <- as.integer(site_x)
-              x_longitudes[[index]] <- longitude_x
-              x_latitudes[[index]] <- latitude_x
-              y_ids[[index]] <- as.integer(site_y)
-              y_longitudes[[index]] <- longitude_y
-              y_latitudes[[index]] <- latitude_y
-              distances[[index]] <- distance
-              r2s[[index]] <- r_squared
+                site_measures_x <- measures_x[site_rows]
+                site_measures_y <- measures_y[site_rows]
+                site_measures_z <- matched_measures_z[site_rows]
+                r_squared <- 0.0
+                lm_model <- NULL
+                sample_size <- length(site_measures_x)
+
+                if (sample_size > 15L && !all(is.na(site_measures_z))) {
+                  
+                  if (object@correction_selection == 1L) {
+                    # Additive
+
+                    if (quadratic_regression) {
+                      lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2) + site_measures_z)
+                      # coefficients <- coef(lm_model)
+                      r_squared <- summary(lm_model)$r.squared
+                    } else if (cubic_regression) {
+                      # For cubic R-squared
+                      lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2) + I(site_measures_x^3) + site_measures_z)
+                      # coefficients <- coef(lm_model)
+                      r_squared <- summary(lm_model)$r.squared
+                    } else {
+                      lm_model <- lm(site_measures_y ~ site_measures_x + site_measures_z)
+                      # coefficients <- coef(lm_model)
+                      r_squared <- summary(lm_model)$r.squared
+                    }
+                  } else if (object@correction_selection == 2L) {
+                    # interactive
+                  
+                    if (quadratic_regression) {
+                      lm_model <- lm(site_measures_y ~ (site_measures_x + I(site_measures_x^2)) * site_measures_z)
+                      # coefficients <- coef(lm_model)
+                      r_squared <- summary(lm_model)$r.squared
+                    } else if (cubic_regression) {
+                      # For cubic R-squared
+                      lm_model <- lm(site_measures_y ~ (site_measures_x + I(site_measures_x^2) + I(site_measures_x^3)) * site_measures_z)
+                      # coefficients <- coef(lm_model)
+                      r_squared <- summary(lm_model)$r.squared
+                    } else {
+                      lm_model <- lm(site_measures_y ~ site_measures_x * site_measures_z)
+                      # coefficients <- coef(lm_model)
+                      r_squared <- summary(lm_model)$r.squared
+                    }
+                  }
+
+                  # Compute column values:
+
+                  site_longitudes_x <- longitudes_x[site_rows]
+                  site_latitudes_x <- latitudes_x[site_rows]
+                  site_longitudes_y <- longitudes_y[site_rows]
+                  site_latitudes_y <- latitudes_y[site_rows]
+                  site_z <- sites_z_matched[site_rows]
+                  site_z <- unique(na.omit(site_z))
+                  longitude_x <- site_longitudes_x[[1L]]
+                  latitude_x <- site_latitudes_x[[1L]]
+                  longitude_y <- site_longitudes_y[[1L]]
+                  latitude_y <- site_latitudes_y[[1L]]
+                  distance <-
+                    ASNAT_distance_meters(longitude_x, latitude_x,
+                                          longitude_y, latitude_y)
+
+                  # Store column values:
+
+                  index <- index + 1L
+                  x_ids[[index]] <- as.integer(site_x)
+                  x_longitudes[[index]] <- longitude_x
+                  x_latitudes[[index]] <- latitude_x
+                  y_ids[[index]] <- as.integer(site_y)
+                  y_longitudes[[index]] <- longitude_y
+                  y_latitudes[[index]] <- latitude_y
+                  distances[[index]] <- distance
+                  r2s[[index]] <- r_squared
+                  equations[[index]] <- lm_model
+                  z_ids[[index]] <- as.integer(site_z)
+                }
+              }
             }
           }
         }
@@ -2830,15 +3097,37 @@ function(object, dataset_x_name, dataset_x_variable,
           y_latitude_label <-
             paste0(coverage_source_dataset_y, ".latitude(deg)")
 
-          object@comparison_r2_data_frame <-
-            data.frame(x_ids, x_longitudes, x_latitudes,
-                       y_ids, y_longitudes, y_latitudes,
-                       distances, r2s)
+          if (object@correction_selection == 1L ||
+              object@correction_selection == 2L) {
+          # multivariable regression
+            z_ids <- unlist(z_ids)
+            object@comparison_r2_data_frame <-
+              data.frame(x_ids, x_longitudes, x_latitudes,
+                        y_ids, y_longitudes, y_latitudes,
+                        distances, r2s, z_ids)
 
-          colnames(object@comparison_r2_data_frame) <-
-            c(x_id_label, x_longitude_label, x_latitude_label,
-              y_id_label, y_longitude_label, y_latitude_label,
-              "distance(m)", "R2(-)")
+            colnames(object@comparison_r2_data_frame) <-
+              c(x_id_label, x_longitude_label, x_latitude_label,
+                y_id_label, y_longitude_label, y_latitude_label,
+                "distance(m)", "R2(-)", z_id_label)
+            object@comparison_r2_model_frame <- data.frame(x_ids, y_ids, z_ids, distances, r2s)
+          } else {
+            # single variable regression
+
+            object@comparison_r2_data_frame <-
+              data.frame(x_ids, x_longitudes, x_latitudes,
+                        y_ids, y_longitudes, y_latitudes,
+                        distances, r2s)
+
+            colnames(object@comparison_r2_data_frame) <-
+              c(x_id_label, x_longitude_label, x_latitude_label,
+                y_id_label, y_longitude_label, y_latitude_label,
+                "distance(m)", "R2(-)")
+            object@comparison_r2_model_frame <- data.frame(x_ids, y_ids, distances, r2s)
+          }
+
+          # object@equation_list <- list(equations, x_measurements, y_measurements)
+          object@equation_list <- equations
 
           directory <- data_directory(object@dataset_manager)
           file_format <- "tsv"
@@ -2924,8 +3213,8 @@ function(object, dataset_x_name, dataset_x_variable,
 # and write it to tab-delimited ASCII file in $HOME/ASNAT/data/tmp/
 # then load the data then return the object.
 # Example:
-# asnat_model <-
-#   retrieve_data(asnat_model, "PurpleAir.pm25_corrected")
+# asnat_model <<- retrieve_data(asnat_model, "PurpleAir.pm25_corrected")
+#
 # if (ok(asnat_model)) {
 #   last <- dataset_count(asnat_model)
 #   dataset <- dataset(asnat_model, last)
@@ -2973,8 +3262,8 @@ function(object, coverage) {
 # Get vector of purple air site and note strings in bounding area.
 # Example:
 # sites <- purple_air_sites(asnat_model)
-#   print(sites)
-# }
+# print(sites)
+#
 
 ASNAT_declare_method("ASNAT_Model", "purple_air_sites",
 function(object) {
@@ -3009,8 +3298,8 @@ function(object) {
 # Get vector of dataset_x neighbor site and note strings.
 # Example:
 # sites <- dataset_x_neighbors_id_note(asnat_model, "AQS.pm25")
-#   print(sites)
-# }
+# print(sites)
+#
 
 ASNAT_declare_method("ASNAT_Model", "dataset_x_neighbors_id_note",
 function(object, dataset_x_name) {
@@ -3079,7 +3368,7 @@ function(object, data_frame, name) {
 
 # Save datasets to specified output_directory:
 # Example:
-# asnat_model <- save_datasets(asnat_model, "csv")
+# asnat_model <<- save_datasets(asnat_model, "csv")
 #
 # if (ok(asnat_model)) {
 #   list.files(output_directory(asnat_model), pattern = "*.txt")
@@ -3275,7 +3564,6 @@ function(object) {
     object@saved_files[count] <- output_file_name
   }
 
-
   ASNAT_check(methods::validObject(object))
   ASNAT_elapsed_timer("save_datasets:", timer)
   return(object)
@@ -3285,8 +3573,8 @@ function(object) {
 
 # Save state:
 # Example:
-#   asnat_model <- save_state(asnat_model)
-#   ok(asnat_model)
+#   asnat_model <<- save_state(asnat_model)
+#   print(ok(asnat_model))
 
 ASNAT_declare_method("ASNAT_Model", "save_state",
 function(object) {
