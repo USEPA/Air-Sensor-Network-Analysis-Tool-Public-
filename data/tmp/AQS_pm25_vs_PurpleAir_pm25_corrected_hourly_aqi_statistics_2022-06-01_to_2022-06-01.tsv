@@ -1,0 +1,9 @@
+Unflagged Neighboring Hourly Point Measures (<= 5000m) AQI Category Statistics: AQS.pm25 vs PurpleAir.pm25_corrected_hourly
+2022-06-01 (-74.8067, -72.9029) - (40.2224, 41.5506)
+AQI_Category(-)	Upper_Limit(ug/m3)	Count(-)	NMBE(%)	RMSE(ug/m3)	NRMSE(%)
+Good	9	407	-Inf	3.02192514394803	61.3918106013201
+Moderate	35.4	157	41.8046796749042	5.73694242820046	47.5755314402848
+Unhealthy for some	55.4	0	0	0	0
+Unhealthy	125.4	0	0	0	0
+Very Unhealthy	225.4	0	0	0	0
+Hazardous	1e+06	0	0	0	0

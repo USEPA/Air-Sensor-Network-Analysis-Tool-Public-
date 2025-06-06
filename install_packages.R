@@ -34,10 +34,10 @@ if (!require(zoo)) install.packages("zoo", repos = repository)
 
 cat("\n\nTesting that the Rtools C++ compiler works:\n")
 
-Rcpp::sourceCpp(code = '
+Rcpp::sourceCpp(code = "
 #include <Rcpp.h>
 // [[Rcpp::export]]
-bool test_cpp_works() {return true;}')
+bool test_cpp_works() {return true;}")
 
 stopifnot(test_cpp_works())
 

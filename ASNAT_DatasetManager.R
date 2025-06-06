@@ -22,32 +22,15 @@ source("ASNAT_Dataset.R")   # For class ASNAT_Dataset.
 # Load required libraries:
 ###############################################################################
 
-# URL to download any required R packages from:
-
-repository <- "http://cran.us.r-project.org"
-
 library(methods)
 
 if (ASNAT_is_remote_hosted) {
-  library(httr) # For httr::http_error().
   library(jsonlite) # For jsonlite::toJSON().
 } else {
-  if (!require(httr)) install.packages("httr", repos = repository)
+  repository <- "http://cran.us.r-project.org"
   if (!require(jsonlite)) install.packages("jsonlite", repos = repository)
 }
 
-###############################################################################
-# Global constants:
-###############################################################################
-
-# If maple is reachable then use it otherwise use ofmpub:
-
-rsigserver_url <-
-if (is.logical(try(httr::http_error("https://maple.hesc.epa.gov"), silent = TRUE))) "https://maple.hesc.epa.gov/rsig/rsigserver?" else
-  "https://ofmpub.epa.gov/rsig/rsigserver?"
-
-rsigserver_is_reachable <-
-  is.logical(try(httr::http_error(rsigserver_url), silent = TRUE))
 
 ###############################################################################
 
@@ -59,7 +42,9 @@ methods::setClass(
   slots = list(
     datasets = "vector", # Vector of loaded ASNAT_Dataset objects.
     ok = "logical", # Did last command succeed?
+    current_version = "integer", # Version (YYYYMMDD) of ASNAT on rsigserver.
     timeout_seconds = "integer", # Seconds to wait to timeout retrievals.
+    rsigserver_url = "character", # URL to rsigserver webservice.
     data_directory = "character", # Where streamed data files are written.
     retrieving_url_callback = "function", # Optional callback function.
     retrieved_urls = "vector", # Vector of URLs retrieved last.
@@ -97,10 +82,49 @@ function(app_directory, data_subdirectory = NULL) {
     dir.create(data_directory, recursive = TRUE)
   }
 
+  # Get current version of ASNAT as integer yyyymmdd.
+  # If maple is reachable then use it otherwise try again with ofmpub:
+
+  rsigserver_url <- "https://maple.hesc.epa.gov/rsig/rsigserver?"
+  current_version <- 0L
+  attempts <- 1L
+
+  while (current_version == 0L && attempts <= 2L) {
+    url <- paste0(rsigserver_url, "asnat/download/ASNAT_VERSION")
+    output_file_name <- paste0(data_directory, "/ASNAT_VERSION")
+    quick_timeout_seconds <- 10L
+    silent <- TRUE
+    ok <- ASNAT_http_get(url, quick_timeout_seconds, output_file_name, silent)
+
+    if (ok) {
+      the_content <- try(silent = TRUE, readLines(output_file_name, 1L))
+      unlink(output_file_name)
+
+      if (class(the_content) == "character") {
+        value <- as.integer(the_content)
+
+        if (value >= 20221001L && value <= 29991231L) {
+          current_version <- value
+        }
+      }
+    }
+
+    if (current_version == 0L) {
+      rsigserver_url <- "https://ofmpub.epa.gov/rsig/rsigserver?"
+    }
+
+    attempts <- attempts + 1L
+  }
+
+  ASNAT_dprint("rsigserver_url = %s, current_version = %d\n",
+               rsigserver_url, current_version)
+
   object <- methods::new("ASNAT_DatasetManager",
                           datasets = vector(),
                           ok = TRUE,
+                          current_version = current_version,
                           timeout_seconds = 300L,
+                          rsigserver_url = rsigserver_url,
                           data_directory = data_directory,
                           retrieving_url_callback = function(...) {},
                           retrieved_urls = vector(),
@@ -114,8 +138,19 @@ function(app_directory, data_subdirectory = NULL) {
 
 ASNAT_declare_method("ASNAT_DatasetManager", "ok", function(object) object@ok)
 
+# Get current version (yyyymmdd) of ASNAT on rsigserver (cached):
+
+ASNAT_declare_method("ASNAT_DatasetManager", "current_version",
+function(object) object@current_version)
+
 ASNAT_declare_method("ASNAT_DatasetManager", "timeout_seconds",
 function(object) object@timeout_seconds)
+
+# Get URL of rsigserver webservice:
+
+ASNAT_declare_method("ASNAT_DatasetManager", "rsigserver_url",
+function(object) object@rsigserver_url)
+
 
 ASNAT_declare_method("ASNAT_DatasetManager", "data_directory",
 function(object) object@data_directory)
@@ -198,36 +233,11 @@ function(object) get_dataset_attribute(object, maximum))
 ASNAT_declare_method("ASNAT_DatasetManager", "download_url",
 function(object) {
   platform <- ASNAT_platform()
-  result <- paste0(rsigserver_url, "asnat/download/", platform, "/ASNAT.zip")
+  result <-
+    paste0(object@rsigserver_url, "asnat/download/", platform, "/ASNAT.zip")
   return(result)
 })
 
-# Get current version of this application as integer yyyymmdd:
-
-ASNAT_declare_method("ASNAT_DatasetManager", "current_version",
-function(object) {
-  url <- paste0(rsigserver_url, "asnat/download/ASNAT_VERSION")
-  quick_timeout_seconds <- 10L
-  output_file_name <- paste0(object@data_directory, "/ASNAT_VERSION")
-  result <- 0L
-  ok <- ASNAT_http_get(url, quick_timeout_seconds, output_file_name)
-
-  if (ok) {
-    the_content <- try(silent = TRUE, readLines(output_file_name, 1L))
-    unlink(output_file_name)
-
-    if (class(the_content) == "character") {
-      value <- as.integer(the_content)
-
-      if (value >= 20221001L && value <= 29991231L) {
-        result <- value
-      }
-    }
-  }
-
-  ASNAT_dprint("version = %d\n", result)
-  return(result)
-})
 
 
 # Setters:
@@ -499,7 +509,7 @@ function(object,
     yyyy_mm_dd <- format(request_date, "%Y-%m-%d")
     time_range <- paste0(yyyy_mm_dd, "T00:00:00Z/", yyyy_mm_dd, "T23:59:59Z")
 
-    url <- paste0(rsigserver_url,
+    url <- paste0(object@rsigserver_url,
                   "SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage",
                   "&FORMAT=ascii",
                   "&COVERAGE=",
@@ -707,7 +717,7 @@ function(object, start_date, key) {
     yyyy_mm_dd <- format(the_date, "%Y-%m-%d")
     time_option <- paste0(yyyy_mm_dd, "T00:00:00Z")
 
-    url <- paste0(rsigserver_url,
+    url <- paste0(object@rsigserver_url,
                   "SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage",
                   "&FORMAT=ascii",
                   "&COVERAGE=PurpleAir.sites",
@@ -829,6 +839,22 @@ function(object, data_frame, aggregate, name) {
   object@ok <- TRUE
 
   ASNAT_dprint("append_data_frame() returning\n")
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
+# Replace a dataset:
+
+ASNAT_declare_method("ASNAT_DatasetManager", "replace_dataset",
+function(object, dataset_index, dataset) {
+  ASNAT_dprint("In ASNAT_DatasetManager replace_dataset()\n")
+  ASNAT_check(methods::validObject(object))
+  stopifnot(dataset_index > 0L)
+  stopifnot(dataset_index <= count(object))
+  stopifnot(class(dataset) == "ASNAT_Dataset")
+  object@datasets[[dataset_index]] <- dataset
   ASNAT_check(methods::validObject(object))
   return(object)
 })

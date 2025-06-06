@@ -34,7 +34,6 @@
 
 source("ASNAT_Utilities.R")
 source("ASNAT_Dataset.R")
-source("ASNAT_DatasetManager.R")
 source("ASNAT_Model.R")
 
 ###############################################################################
@@ -107,13 +106,15 @@ if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
 # Initialize global constants:
 ###############################################################################
 
-user_manual_url <-
-  paste0(rsigserver_url, "asnat/download/ASNAT_User_Manual.pdf")
-
 purple_air_attribution_url <- "https://www2.purpleair.com/pages/attribution"
 
 aqs_parameter_codes_url <-
   "https://aqs.epa.gov/aqsweb/documents/codetables/parameters.html"
+
+nowcast_url <-
+  "https://en.wikipedia.org/wiki/NowCast_(air_quality_index)"
+# "https://www.epa.gov/sites/default/files/2018-01/documents/nowcastfactsheet.pdf"
+# "https://rdrr.io/cran/AirMonitor/src/R/monitor_nowcast.R"
 
 all_purple_air_sites <- "0 All sensors in view"
 all_dataset_x_neighbor_sites <- "0 All Sites"
@@ -261,6 +262,8 @@ initialize_variable_lists()
 
 default_model <- ASNAT_Model()
 
+user_manual_url <- "ASNAT_User_Manual.pdf" # Under www/ subdirectory.
+#  paste0(rsigserver_url(default_model), "asnat/download/ASNAT_User_Manual.pdf")
 
 
 ################ Globals and functions for map legend colormaps ###############
@@ -530,7 +533,18 @@ ui <- fluidPage(
                  margin-left: auto; margin-right: auto;
                  width: 100%;
                  max-width: 450px;
-              }"),
+              }"
+    ),
+    tags$script(HTML("
+      $(document).ready(function() {
+        var objDiv = document.getElementById('message_area');
+        var observer = new MutationObserver(function(mutations) {
+          objDiv.scrollTop = 1.0 * (objDiv.scrollHeight - objDiv.clientHeight);
+        });
+        var config = {childList: true};
+        observer.observe(objDiv, config);
+      })"
+    )),
     tags$style(type = "text/css",
       ".data-load-btn:disabled {
         opacity: 0.5 !important;
@@ -822,6 +836,19 @@ ui <- fluidPage(
                                 "Dataset X or Dataset Y."),
                          options = tooltip_options),
 
+      actionButton("compute_hourly_nowcast", label = "Compute Hourly Nowcast"),
+
+      shinyBS::bsTooltip("compute_hourly_nowcast",
+                         paste0("Compute hourly Nowcast values for each of the",
+                                " above Selected Dataset X/Y/Z Variables",
+                                " (if pm10(ug/m3), pm25(ug/m3) or ozone(ppb))."),
+                         placement = "right",
+                         options = tooltip_options),
+
+      tags$a(href = nowcast_url, target = "_blank", "NowCast Info"),
+
+      h1(),
+
       # The tag magic is needed to force label on the same line as widget:
 
       div(style = "position: relative; display: inline-block;",
@@ -946,6 +973,7 @@ ui <- fluidPage(
                                            "PM1 uses PM2.5 breakpoints and ",
                                            "ozone daily uses 8-hour ",
                                            "breakpoints)."),
+                                    placement = "right",
                                     options = tooltip_options),
 
                  checkboxInput("use_fancy_labels",
@@ -1365,7 +1393,7 @@ ui <- fluidPage(
                     shinyBS::bsTooltip("apply_sudden_spike",
                                         paste0("Mark Dataset Y flagged column with",
                                               " 70 if pollutant levels suddenly increase by more than",
-                                              " X times within given timesteps."),                                        placement = "top",
+                                              " X times within given timesteps."), placement = "top",
                                         options = tooltip_options),
 
                     shinyBS::bsTooltip("spike_time_window",
@@ -2085,20 +2113,29 @@ server <- function(input, output, session) {
   # sub-directories to avoid interfering with each other:
 
   model <- NULL
+  this_version_of_asnat <- 0L
+  current_version_of_asnat <- 0L
 
   if (!ASNAT_is_remote_hosted) {
     model <- default_model
 
     # Check if there is a newer version of this program available for download:
 
-    if (is_newer_version_available(model)) {
-      url <- download_url(model)
-      message <- sprintf("A newer version of ASNAT is available:\n%s\n", url)
-      showNotification(message, duration = NULL, closeButton = TRUE,
+    this_version_of_asnat <- version(model)
+    current_version_of_asnat <- current_version(model)
+
+    if (current_version_of_asnat > this_version_of_asnat) {
+      the_download_url <- download_url(model)
+      the_message <-
+        sprintf("A newer version of ASNAT (%d) is available from:\n%s\n",
+                current_version_of_asnat, the_download_url)
+      showNotification(the_message, duration = NULL, closeButton = TRUE,
                        type = "message")
     }
   } else {
     model <- ASNAT_Model(session$token)
+    this_version_of_asnat <- version(model)
+    current_version_of_asnat <- this_version_of_asnat
   }
 
   stopifnot(!is.null(model))
@@ -2119,7 +2156,6 @@ server <- function(input, output, session) {
   }
 
 
-
   if (!ASNAT_is_remote_hosted) {
 
     # https://github.com/daattali/advanced-shiny/blob/master/auto-kill-app/app.R
@@ -2129,12 +2165,30 @@ server <- function(input, output, session) {
   }
 
 
+  # Define global string of appended messages printed to $output$message_area
+  # and function to append a new message (and newline) and display all
+  # messages in message_area:
+
+  messages <- ""
+
+  append_message <- function(new_message) {
+    messages <<-
+      paste0(capture.output(cat(messages, new_message, sep = "\n")),
+             collapse = "\n")
+
+    if (substr(messages, 1L, 1L) == "\n") {
+      messages <<- substr(messages, 2L, nchar(messages))
+    }
+
+    output$message_area <- renderPrint({cat(messages, sep = "")})
+  }
+
 
   # Define and install callback function to be called for ASNAT warnings:
 
   show_warning <- function(failure) {
     ASNAT_dprint("show_warning() called.\n")
-    output$message_area <- renderPrint({cat(failure, sep = "\n")})
+    append_message(failure)
     showNotification(failure, duration = NULL, closeButton = TRUE,
                      type = "warning")
   }
@@ -2142,26 +2196,23 @@ server <- function(input, output, session) {
   ASNAT_set_warning_callback(show_warning)
 
 
-  rsigserver_host <- unlist(strsplit(rsigserver_url, "/"))[[3L]]
+  rsigserver_host <- unlist(strsplit(rsigserver_url(model), "/"))[[3L]]
 
-  if (!rsigserver_is_reachable) {
+  if (current_version_of_asnat == 0L) {
     ASNAT_warning(paste0("Warning: ", rsigserver_host, " is unreachable.\n",
-                         "No web-based data retrievals are possible.\n"))
+                         "No web-based data retrievals are possible."))
   }
 
-
-  output$message_area <-
-    renderPrint({cat("Welcome to ASNAT version: ", version(model),
-                     " R-version: ", paste0(R.version["major"], ".",
-                                           R.version["minor"]),
-                     " platform: ", ASNAT_platform(),
-                     " host: ", Sys.info()[[4L]],
-                     " wd: ", getwd(),
-                     " pid: ", Sys.getpid(),
-                     " session$token: ", session$token,
-                     " rsigserver-host: ", rsigserver_host,
-                     "\n(Network and file I/O messages will appear here).",
-                     sep = "")})
+  append_message(paste0("Welcome to ASNAT version: ", this_version_of_asnat,
+                        " R-version: ", R.version["major"],
+                        ".", R.version["minor"],
+                        " platform: ", ASNAT_platform(),
+                        " host: ", Sys.info()[[4L]],
+                        " wd: ", getwd(),
+                        " pid: ", Sys.getpid(),
+                        " session$token: ", session$token,
+                        " rsigserver-host: ", rsigserver_host,
+                        "\n(Network and file I/O messages will appear here)."))
 
   # the_map (leaflet) is another client-specific (non-shared) variable:
 
@@ -2263,6 +2314,7 @@ server <- function(input, output, session) {
     for (source in sources) {
       glyph <- map_glyph(source)
       file_name <- glyph_file_name(glyph, "black")
+      stopifnot(file.exists(file_name))
       source_label <- paste0("<img src='data:image/png;base64,",
                              base64enc::base64encode(file_name),
                              "' width='30'; height='30';> ",
@@ -2488,11 +2540,13 @@ server <- function(input, output, session) {
 
         glyph <- map_glyph(the_coverage)
         glyph_file_template <- glyph_file_name(glyph, "black")
+        stopifnot(file.exists(glyph_file_template))
         point_glyph_files <- c()
 
         for (color in value_colors) {
           this_glyph_file <-
             gsub(fixed = TRUE, "black", color, glyph_file_template)
+          stopifnot(file.exists(this_glyph_file))
           point_glyph_files <- append(point_glyph_files, this_glyph_file)
         }
 
@@ -2544,6 +2598,14 @@ server <- function(input, output, session) {
             tick_values <- round(tick_values, digits = 2L)
             tick_values <- as.character(tick_values)
             tick_values[1L] <- paste0("<", round(the_minimum, digits = 2L))
+
+            if (selected_colormap[[1L]] == "black" ||
+                selected_colormap[[1L]] ==
+                  rgb(0L, 0L, 0L, maxColorValue = 255L)) {
+              tick_values[1L] <-
+                paste0("<", round(the_minimum, digits = 2L), " or NA")
+            }
+
             the_length <- length(tick_values)
             tick_values[the_length] <- paste0(">", round(the_maximum, digits = 2L))
 
@@ -2768,6 +2830,7 @@ server <- function(input, output, session) {
         coverage_x <- coverage(dataset_x)
         glyph <- map_glyph(coverage_x)
         glyph_file_template <- glyph_file_name(glyph, "black")
+        stopifnot(file.exists(glyph_file_template))
         glyph_icon <- makeIcon(iconUrl = glyph_file_template,
                                iconWidth = glyph_size,
                                iconHeight = glyph_size,
@@ -2817,6 +2880,7 @@ server <- function(input, output, session) {
         # neighbor_color <- the_gray_colormap[[length(the_gray_colormap) - 3L]]
         neighbor_color <- "black"
         glyph_file_template <- glyph_file_name(glyph, neighbor_color)
+        stopifnot(file.exists(glyph_file_template))
         glyph_icon <- makeIcon(iconUrl = glyph_file_template,
                                iconWidth = glyph_size,
                                iconHeight = glyph_size,
@@ -3105,11 +3169,10 @@ server <- function(input, output, session) {
     the_width_height <- ASNAT_width_height(west, east, south, north)
     width_meters <- the_width_height$width
     height_meters <- the_width_height$height
-    message_text <-
-      sprintf("map %0.0fm x %0.0fm [%f, %f] [%f, %f] (%f, %f)\n",
+    append_message(
+      sprintf("map %0.0fm x %0.0fm [%f, %f] [%f, %f] (%f, %f)",
               width_meters, height_meters,
-              west, east, south, north, longitude, latitude)
-    output$message_area <- renderPrint({cat(message_text, sep = "\n")})
+              west, east, south, north, longitude, latitude))
   }
 
 
@@ -3411,7 +3474,7 @@ server <- function(input, output, session) {
       if (!ok) {
         ASNAT_warning("Failed to retrieve PurpleAir site locations.")
       } else {
-        ASNAT_warning("Updated PurpleAir sites menu.")
+        append_message("Updated PurpleAir sites menu.")
       }
 
     } else if (nchar(key) > 0L) {
@@ -3794,6 +3857,7 @@ server <- function(input, output, session) {
             output$map <- leaflet::renderLeaflet(the_map)
 
             clear_tables_and_plots()
+            update_flag_dataset_menu_and_table()
           }
         }
       }
@@ -3922,9 +3986,9 @@ server <- function(input, output, session) {
       }
 
       if (length(grep(fixed = TRUE, "PurpleAir", coverage)) > 0L &&
-          !ASNAT_is_conforming_purple_air_key(input$purple_air_key)) {
+          !ASNAT_is_conforming_purple_air_key(purple_air_key(model))) {
         message_text <-
-          "Skipping PurpleAir retrieval due to non-conforming PurpleAir Key."
+          "Skipping PurpleAir retrieval due to non-validated PurpleAir Key."
         urls <- append(urls, message_text)
         toggleModal(session, "invalidKeyModal", toggle = "toggle")
         next
@@ -3948,7 +4012,7 @@ server <- function(input, output, session) {
 
     count <- dataset_count(model)
     ASNAT_dprint("  dataset_count(model)) = %d\n", count)
-    output$message_area <- renderPrint({cat(urls, sep = "\n")})
+    append_message(capture.output(cat(urls, sep = "\n")))
 
     # Draw data glyphs and legends and timestamp on the map:
 
@@ -4174,6 +4238,123 @@ server <- function(input, output, session) {
 
 
 
+  # Callback for Compute Nowcast button.
+  # Compute the hourly nowcast for each dataset (X, Y, Z) selected variable.
+
+  observeEvent(input$compute_hourly_nowcast, {
+    ASNAT_dprint("compute_hourly_nowcast callback.\n")
+    timer <- ASNAT_start_timer()
+    model_timestep_size <- timestep_size(model)
+
+    if (model_timestep_size != "hours") {
+      ASNAT_warning("Nowcast can only be computed for hourly data.")
+    } else {
+      have <- have_datasets()
+      have_x <- have$x
+      have_y <- have$y
+      have_z <- have$z
+
+      if (have_x) {
+        compute_hourly_nowcast_of_dataset_variable("x")
+      }
+
+      if (have_y) {
+        compute_hourly_nowcast_of_dataset_variable("y")
+      }
+
+      if (have_z) {
+        compute_hourly_nowcast_of_dataset_variable("z")
+      }
+    }
+
+    ASNAT_elapsed_timer("compute_hourly_nowcast:", timer)
+  })
+
+
+
+  # Helper function to compute hourly nowcast of the selected dataset variable
+  # and update the dataset variable menu to include the new _nowcast variable:
+
+  compute_hourly_nowcast_of_dataset_variable <- function(xyz) {
+    stopifnot(nchar(xyz) == 1L)
+    stopifnot(xyz == "x" || xyz == "y" || xyz == "z")
+
+    selected_variable_and_units <-
+      switch(xyz,
+             "x" = input$dataset_x_variable_menu[1L],
+             "y" = input$dataset_y_variable_menu[1L],
+             "z" = input$dataset_z_variable_menu[1L])
+
+    if (!grepl("_nowcast(", selected_variable_and_units, fixed = TRUE)) {
+      nowcast_parameters <-
+        ASNAT_nowcast_parameters(selected_variable_and_units)
+
+      if (is.null(nowcast_parameters)) {
+        ASNAT_warning(paste0("Nowcast can only be computed for hourly ",
+                             "pm10(ug/m3), pm25(ug/m3) and ozone(ppb) ",
+                             "not ", selected_variable_and_units, "."))
+      } else {
+        selected_dataset <-
+          switch(xyz,
+                 "x" = input$dataset_x_menu[1L],
+                 "y" = input$dataset_y_menu[1L],
+                 "z" = input$dataset_z_menu[1L])
+        the_dataset_index <- dataset_index(model, selected_dataset)
+
+        if (the_dataset_index > 0L) {
+          the_dataset <- dataset(model, the_dataset_index)
+          the_source_variable_and_units <-
+            paste0(source_variable(the_dataset),
+                   "(", variable_units(the_dataset), ")")
+          the_message <-
+            paste0("Computing Nowcast of ", the_source_variable_and_units, "...")
+          showNotification(the_message,
+                           duration = NULL, closeButton = FALSE,
+                           id = "message_popup", type = "message")
+          dataset_with_nowcast <- compute_hourly_nowcast(the_dataset)
+          model <<- replace_dataset(model, the_dataset_index,
+                                    dataset_with_nowcast)
+          removeNotification("message_popup")
+          the_source_nowcast_variable_and_units <-
+            gsub(fixed = TRUE, "(", "_nowcast(", the_source_variable_and_units)
+          append_message(paste0("Added variable ",
+                                the_source_nowcast_variable_and_units))
+          dataset_variable_menu_name <-
+            paste0("dataset_", xyz, "_variable_menu")
+          update_dataset_variable_menu(dataset_with_nowcast,
+                                       dataset_variable_menu_name)
+          update_map_timestep(timestep(model)) # Redraw map with _nowcast data.
+        }
+      }
+    }
+  }
+
+
+
+  # Helper function for dataset variable menu:
+
+  update_dataset_variable_menu <-
+  function(dataset, dataset_variable_menu_name) {
+    ASNAT_dprint("In update_dataset_variable_menu().\n")
+    stopifnot(class(dataset) == "ASNAT_Dataset")
+    stopifnot(nchar(dataset_variable_menu_name) > 0L)
+
+    selected_column <- variable_column(dataset)
+    data_frame <- data_frame(dataset)
+    column_names <- colnames(data_frame)
+    selected_variable <- column_names[[selected_column]]
+    available_variables <- ASNAT_variable_column_names(column_names)
+
+    freezeReactiveValue(input, dataset_variable_menu_name)
+    updateSelectInput(session = session,
+                      inputId = dataset_variable_menu_name,
+                      choices = available_variables,
+                      selected = selected_variable)
+    ASNAT_dprint("update_dataset_variable_menu() returning.\n")
+  }
+
+
+
   update_map_timestep <- function(timestep) {
     stopifnot(isTruthy(timestep))
     stopifnot(timestep >= 0L)
@@ -4392,7 +4573,7 @@ server <- function(input, output, session) {
     #     mapview::mapshot(map, file = file_name,
     #     vwidth = width, wheight = height))
 
-    output$message_area <- renderPrint({cat(file_name, sep = "\n")})
+    append_message(file_name)
     removeNotification("message_popup")
     ASNAT_elapsed_timer("create_map_image_file:", timer)
     return(file_name)
@@ -4538,8 +4719,7 @@ server <- function(input, output, session) {
     cat(command, "\n")
     system(command)
     unlink(image_file_names)
-    output$message_area <-
-      renderPrint({cat(command, "\n", output_movie_file_name)})
+    append_message(capture.output(cat(command, "\n", output_movie_file_name)))
     removeNotification("message_popup")
     ASNAT_elapsed_timer("create_movie_file:", timer)
     return(output_movie_file_name)
@@ -4562,8 +4742,7 @@ server <- function(input, output, session) {
     filename = "map_movie.mp4",
     content = function(file) {
       movie_file_name <- create_movie_file()
-      output$message_area <-
-        renderPrint({cat(movie_file_name, file, sep = "\n")})
+      append_message(capture.output(cat(movie_file_name, file, sep = "\n")))
       file.copy(from = movie_file_name, to = file, overwrite = TRUE)
     },
     contentType = "video/mp4"
@@ -4651,7 +4830,7 @@ server <- function(input, output, session) {
       model <<- save_datasets(model)
     }
 
-    output$message_area <- renderPrint({cat(saved_files(model), sep = "\n")})
+    append_message(capture.output(cat(saved_files(model), sep = "\n")))
   })
 
 
@@ -4666,8 +4845,7 @@ server <- function(input, output, session) {
         check_set_reset_output_directory()
         model <<- save_datasets(model)
         model_saved_files <- saved_files(model)
-        output$message_area <-
-          renderPrint({cat(model_saved_files, file, sep = "\n")})
+        append_message(capture.output(cat(model_saved_files, file, sep = "\n")))
         #utils::zip(file, files = model_saved_files, flags = "-j")
         zip::zip(file, files = model_saved_files,
                  recurse = FALSE, include_directories = FALSE,
@@ -5054,7 +5232,7 @@ server <- function(input, output, session) {
       flags_file_name <- paste0(output_directory(model), "/flags.txt")
       cat(append = TRUE, sep = "\n", file = flags_file_name,
           input$flag_conditions)
-      output$message_area <- renderPrint({flags_file_name})
+      append_message(flags_file_name)
     }
   })
 
@@ -5074,7 +5252,7 @@ server <- function(input, output, session) {
         flags_file_name <- paste0(output_directory(model), "/flags.txt")
         cat(append = TRUE, sep = "\n", file = flags_file_name,
             input$flag_conditions)
-        output$message_area <- renderPrint({flags_file_name})
+        append_message(flags_file_name)
         file.copy(from = flags_file_name, to = file, overwrite = TRUE)
       }
     },
@@ -5915,7 +6093,7 @@ server <- function(input, output, session) {
                         caption =
                           paste("Device-Level Statistics for", dataset_name),
                         options = list(paging = FALSE),
-                        class = 'row-border stripe hover nowrap')
+                        class = "row-border stripe hover nowrap")
         })
       }
     }
@@ -6164,6 +6342,11 @@ server <- function(input, output, session) {
     ASNAT_dprint("In draw_boxplot(%s)\n", main_title)
     result <- NULL
 
+    if (all(is.na(data_frame[[2L]]))) {
+      ASNAT_warning(paste0("No non-missing ", y_label, " data for boxplot."))
+      return(NULL)
+    }
+
     if (!is.null(file_name)) {
       ASNAT_dprint("In draw_boxplot() calling pdf(%s)\n", file_name)
       pdf(file_name, width = the_pdf_width, height = the_pdf_height,
@@ -6193,7 +6376,6 @@ server <- function(input, output, session) {
           plotly::plot_ly(data_frame,
                           x = ~as.character(site_id), y = ~measure,
                           type = "box",
-                          # FIX: Set color to black or gray.
                           colors = "gray",
                           marker = list(color = "gray"),
                           line = list(color = "gray")) %>%
@@ -6969,6 +7151,13 @@ server <- function(input, output, session) {
 
     measure_column <- variable_column(the_dataset)
     measures <- subset_data_frame[[measure_column]]
+
+    if (all(is.na(measures))) {
+      ASNAT_warning(paste0("No non-missing ", y_label,
+                           " data for time-series plot."))
+      return(NULL)
+    }
+
     minimum <- min(measures, na.rm = TRUE)
     maximum <- max(measures, na.rm = TRUE)
     flagged_column <- ASNAT_flagged_column_index(column_names)
@@ -7083,33 +7272,6 @@ server <- function(input, output, session) {
                       "NMBE: %0.2f%%"),
               n, r_squared, rmse, nrmse, nmbe)
 
-    }
-
-    # FIX: Replace R2 in stats_label with R-superscript-2:
-    # https://www.statology.org/superscript-subscript-in-r/
-    # https://coderclub.w.uib.no/2015/05/07/expressions-in-r/
-
-    FANCY_LABEL_HACK <- FALSE
-
-    if (FANCY_LABEL_HACK) {
-      stats_label_before_R2 <-
-        sprintf(paste0("N: %d\n",
-                       "Slope: %0.2f\n",
-                       "Y-Intercept: %0.2f\n"),
-                n, slope, y_intercept)
-      stats_label_after_R2 <-
-        sprintf(paste0(": %0.2f\n",
-                       "RMSE: %0.2f\n",
-                       "NRMSE: %0.2f%%\n",
-                       "NMBE: %0.2f%%"),
-                r_squared, rmse, nrmse, nmbe)
-
-      if (!interactive) {
-        label <- paste0(label, "\n_____ is regression line")
-      }
-
-      label <-
-        bquote(.(stats_label_before_R2)~R^2~.(stats_label_after_R2))
     }
 
     result <- list(label = label,
@@ -7318,9 +7480,9 @@ server <- function(input, output, session) {
     # Create a data frame for lines per device
     # Add y = x line
     lines_data <- data.frame(device_id = unique(plot_data$device_id),
-                                slope = 1,
-                                y_intercept = 0,
-                                Type = "y = x")
+                             slope = 1,
+                             y_intercept = 0,
+                             Type = "y = x")
 
     # Base ggplot scatter plot
     p <- ggplot(plot_data, aes(x = x, y = y)) +
@@ -7394,7 +7556,7 @@ server <- function(input, output, session) {
                            color = "black", size = 1.5)
       } else if (input$pre_regression_type == "single") {
 
-        if ( input$regression_type == "Quadratic") {
+        if (input$regression_type == "Quadratic") {
           p <- p + stat_smooth(method = "lm",
                               formula = y ~ poly(x, 2),
                               se = FALSE,
@@ -7923,6 +8085,12 @@ server <- function(input, output, session) {
     ASNAT_debug(str, subset_data_frame)
 
     result <- NULL
+
+    if (all(is.na(subset_data_frame[[2L]]))) {
+      ASNAT_warning(paste0("No non-missing ", source_variable,
+                            " data for AQI Summary plot."))
+      return(NULL)
+    }
 
     if (save_to_file) {
       directory <- output_directory(model)
@@ -9075,7 +9243,7 @@ server <- function(input, output, session) {
         }
       }
 
-      output$message_area <- renderPrint({cat(saved_plot_files, sep = "\n")})
+      append_message(capture.output(cat(saved_plot_files, sep = "\n")))
     }
 
     ASNAT_elapsed_timer("save_plot_files:", timer)
@@ -9132,7 +9300,7 @@ server <- function(input, output, session) {
 
 
   # Reactive value to store the currently selected model for editing
-  selected_model <- reactiveVal(NULL)
+  # selected_model <- reactiveVal(NULL)
 
   # Reactive values to store selected variables
   selected_vars <- reactiveValues(
@@ -9265,68 +9433,68 @@ server <- function(input, output, session) {
 
 
   # Function to validate custom equation input
-  validate_equation <- function(equation) {
-    # Trim whitespace from the equation
-    equation <- trimws(equation)
-
-    # 1. Check if the equation is not empty
-    if (nchar(equation) == 0) {
-      return(FALSE)
-    }
-
-    # 2. Check if there is exactly one "=" in the equation
-    if (sum(strsplit(equation, "")[[1]] == "=") != 1) {
-      return(FALSE)
-    }
-
-    # 3. Check if there are non-empty parts on both sides of "="
-    parts <- strsplit(equation, "=")[[1]]
-
-    if (length(parts) != 2 || nchar(trimws(parts[1])) == 0 || nchar(trimws(parts[2])) == 0) {
-      return(FALSE)
-    }
-
-    return(TRUE)
-  }
+  # validate_equation <- function(equation) {
+  #   # Trim whitespace from the equation
+  #   equation <- trimws(equation)
+  #
+  #   # 1. Check if the equation is not empty
+  #   if (nchar(equation) == 0) {
+  #     return(FALSE)
+  #   }
+  #
+  #   # 2. Check if there is exactly one "=" in the equation
+  #   if (sum(strsplit(equation, "")[[1]] == "=") != 1) {
+  #     return(FALSE)
+  #   }
+  #
+  #   # 3. Check if there are non-empty parts on both sides of "="
+  #   parts <- strsplit(equation, "=")[[1]]
+  #
+  #   if (length(parts) != 2 || nchar(trimws(parts[1])) == 0 || nchar(trimws(parts[2])) == 0) {
+  #     return(FALSE)
+  #   }
+  #
+  #   return(TRUE)
+  # }
 
 
 
   # Helper function to get all loaded datasets
-  get_all_datasets <- function(model) {
-    dataset_count <- dataset_count(model)
-    all_datasets <- list()
+  # get_all_datasets <- function(model) {
+  #   dataset_count <- dataset_count(model)
+  #   all_datasets <- list()
+  #
+  #   for (i in 1:dataset_count) {
+  #     dataset <- dataset(model, i)
+  #     all_datasets[[coverage(dataset)]] <- dataset
+  #   }
+  #
+  #   return(all_datasets)
+  # }
 
-    for (i in 1:dataset_count) {
-      dataset <- dataset(model, i)
-      all_datasets[[coverage(dataset)]] <- dataset
-    }
-
-    return(all_datasets)
-  }
 
 
-
-  parse_equation <- function(dependent, independent) {
-    dependent <- trimws(dependent)
-    independent <- trimws(independent)
-
-    if (nchar(dependent) == 0 || nchar(independent) == 0) {
-      return(list(error = "Both dependent and independent variables must be specified"))
-    }
-
-    dependent_vars <- unlist(strsplit(dependent, "\\s+"))
-    independent_vars <- unlist(strsplit(independent, "\\s+"))
-
-    if (length(dependent_vars) > 1) {
-      return(list(error = "Only one dependent variable is allowed"))
-    }
-
-    return(list(
-      dependent = dependent_vars[1],
-      predictors = independent_vars,
-      num_variables = length(independent_vars)
-    ))
-  }
+  # parse_equation <- function(dependent, independent) {
+  #   dependent <- trimws(dependent)
+  #   independent <- trimws(independent)
+  #
+  #   if (nchar(dependent) == 0 || nchar(independent) == 0) {
+  #     return(list(error = "Both dependent and independent variables must be specified"))
+  #   }
+  #
+  #   dependent_vars <- unlist(strsplit(dependent, "\\s+"))
+  #   independent_vars <- unlist(strsplit(independent, "\\s+"))
+  #
+  #   if (length(dependent_vars) > 1) {
+  #     return(list(error = "Only one dependent variable is allowed"))
+  #   }
+  #
+  #   return(list(
+  #     dependent = dependent_vars[1],
+  #     predictors = independent_vars,
+  #     num_variables = length(independent_vars)
+  #   ))
+  # }
 
 
 
@@ -9733,7 +9901,7 @@ server <- function(input, output, session) {
     station_pairs <- summary_y[, c("Site_Id(-)", "Nearest_Y_Site(-)")]
 
     # Create a logical vector for matching pairs
-    matched_pairs <- sapply(1:nrow(comparison_r2_df), function(i) {
+    matched_pairs <- sapply(seq_along(comparison_r2_df), function(i) {
       x_id <- comparison_r2_df[i, 1]  # Using column index 4 instead of name
       y_id <- comparison_r2_df[i, 4]  # Using column index 1 instead of name
 
@@ -10150,7 +10318,8 @@ server <- function(input, output, session) {
 
     # Retrieve the data for the selected device from the correction dictionary
     device_data <- correction_dictionary(model)[[device_id]]
-    corrected_column_name <- paste0(device_data$dependent_var, "_corrected")
+    corrected_column_name <-
+      gsub(fixed = TRUE, "(", "_corrected(", device_data$dependent_var)
 
     corrected_df <- device_data$filtered_data_y
     corrected_df[[corrected_column_name]] <- device_data$calculated_values
@@ -10454,28 +10623,28 @@ server <- function(input, output, session) {
   # Functions for equation creation
   # -----------------------------------------------
 
-  find_id_column <- function(data_frame, prefix = NULL) {
-
-    for (col_name in colnames(data_frame)) {
-
-      # Check for exact matches first, else grep for patterns
-      if (col_name %in% c("id(-)", "PurpleAir.id(-)", "AQS.id(-)")) {
-
-        if (is.null(prefix) || grepl(paste0("^", prefix), col_name)) {
-          return(col_name)
-        }
-      } else if (grepl("id\\(-\\)$", col_name, ignore.case = TRUE) ||
-                 grepl("\\.id$", col_name, ignore.case = TRUE) ||
-                 grepl("^id\\.", col_name, ignore.case = TRUE)) {
-
-        if (is.null(prefix) || grepl(paste0("^", prefix), col_name, ignore.case = TRUE)) {
-          return(col_name)
-        }
-      }
-    }
-
-    return(NULL)
-  }
+  # find_id_column <- function(data_frame, prefix = NULL) {
+  #
+  #   for (col_name in colnames(data_frame)) {
+  #
+  #     # Check for exact matches first, else grep for patterns
+  #     if (col_name %in% c("id(-)", "PurpleAir.id(-)", "AQS.id(-)")) {
+  #
+  #       if (is.null(prefix) || grepl(paste0("^", prefix), col_name)) {
+  #         return(col_name)
+  #       }
+  #     } else if (grepl("id\\(-\\)$", col_name, ignore.case = TRUE) ||
+  #                grepl("\\.id$", col_name, ignore.case = TRUE) ||
+  #                grepl("^id\\.", col_name, ignore.case = TRUE)) {
+  #
+  #       if (is.null(prefix) || grepl(paste0("^", prefix), col_name, ignore.case = TRUE)) {
+  #         return(col_name)
+  #       }
+  #     }
+  #   }
+  #
+  #   return(NULL)
+  # }
 
 
 
@@ -10485,6 +10654,7 @@ server <- function(input, output, session) {
 
     # 2. Check if rows are selected in the Neighboring Points table
     selected_rows <- input$selectable_correction_table_rows_selected
+
     if (length(selected_rows) == 0) {
       showNotification("Please select rows from the Neighboring Points table.", type = "warning")
       return()
@@ -10509,7 +10679,7 @@ server <- function(input, output, session) {
 
     display_equation <- list()
 
-    for (i in 1:nrow(selected_data)) {
+    for (i in seq_along(selected_data)) {
       record <- selected_data[i, ]
       id <- record[[1]]
       x_id <- record[[6]]
@@ -10517,7 +10687,7 @@ server <- function(input, output, session) {
       filtered_data_y <- full_data[full_data[[id_column_y]] %in% id, ]
       min_size <- switch(input$regression_type,
                          "Linear" = 20,
-                         "Quadratic" = 30, 
+                         "Quadratic" = 30,
                          "Cubic" = 40,
                          15) # Default fallback
 
@@ -10538,7 +10708,7 @@ server <- function(input, output, session) {
       dependent_var <- paste0(dataset_y_name, ".", input$dataset_y_variable_menu)
       independent_vars <- paste0(dataset_x_name, ".", input$dataset_x_variable_menu)
 
-      row_num <- with(model_compare_frame, which(y_ids == id & x_ids == x_id ))
+      row_num <- with(model_compare_frame, which(y_ids == id & x_ids == x_id))
 
       lm_model <- model_equation_list[[row_num]]
       # Perform regression based on the selected type
@@ -10562,19 +10732,19 @@ server <- function(input, output, session) {
             y <- filtered_data_y[[dependent_var]]
             actual_x <- filtered_data_y[[independent_vars]]
 
-            discriminant <- b^2 - 4*c*(a - y)
+            discriminant <- b^2 - 4 * c * (a - y)
 
             # Check discriminant to avoid NaNs
             discriminant[discriminant < 0] <- NA
 
             sqrt_discriminant <- sqrt(discriminant)
 
-            x1 <- (-b + sqrt_discriminant) / (2*c)
-            x2 <- (-b - sqrt_discriminant) / (2*c)
+            x1 <- (-b + sqrt_discriminant) / (2 * c)
+            x2 <- (-b - sqrt_discriminant) / (2 * c)
 
             # Choose the root closest to actual_x
-           calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)          
-          
+            calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)
+
           } else if (input$regression_type == "Cubic") {
 
             coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
@@ -10587,7 +10757,7 @@ server <- function(input, output, session) {
 
 
             # Define the cubic function
-            cubic_fn <- function(x, y) {
+            cubic_fn1 <- function(x, y) {
               a <- coefficients[4]  # cubic coefficient
               b <- coefficients[3]  # quadratic coefficient
               c <- coefficients[2]  # linear coefficient
@@ -10603,7 +10773,7 @@ server <- function(input, output, session) {
               # Use the actual x as starting point for optimization
               result <- optim(
                 par = actual_x[i],
-                fn = cubic_fn,
+                fn = cubic_fn1,
                 y = actual_y[i],
                 method = "BFGS"
               )
@@ -10626,18 +10796,18 @@ server <- function(input, output, session) {
 
             coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
             equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
-         
+
             a <- coefficients[3]  # x1^2 coefficient
             b <- coefficients[2]  # x1 coefficient
             c <- coefficients[1] + coefficients[4] * x2_values - filtered_data_y[[dependent_var]]
 
             actual_x <- filtered_data_y[[independent_vars]]
-            discriminant <- b^2 - 4*a*c
+            discriminant <- b^2 - 4 * a * c
             discriminant[discriminant < 0] <- NA
 
             sqrt_discriminant <- sqrt(discriminant)
-            x1 <- (-b + sqrt_discriminant) / (2*a)
-            x2 <- (-b - sqrt_discriminant) / (2*a)
+            x1 <- (-b + sqrt_discriminant) / (2 * a)
+            x2 <- (-b - sqrt_discriminant) / (2 * a)
 
             calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)
 
@@ -10699,8 +10869,8 @@ server <- function(input, output, session) {
             equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2 + %.4fx1x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
             # Solve: y = b0 + b2*x2 + x1*(b1+b3*x2)
             # Rearranged: x1 = (y - b0 - b2*x2) / (b1 + b3*x2)
-            calibration_value <- round((filtered_data_y[[dependent_var]] - coefficients[1] - coefficients[3] * x2_values) / 
-                                        (coefficients[2] + coefficients[4] * x2_values), 4)       
+            calibration_value <- round((filtered_data_y[[dependent_var]] - coefficients[1] - coefficients[3] * x2_values) /
+                                        (coefficients[2] + coefficients[4] * x2_values), 4)
 
           } else if (input$regression_type == "Quadratic") {
             coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
@@ -10722,7 +10892,7 @@ server <- function(input, output, session) {
             # Solve quadratic equation for x1
             x1_sol1 <- (-b + sqrt_discriminant) / (2 * a)
             x1_sol2 <- (-b - sqrt_discriminant) / (2 * a)
-            
+
             # If an actual x1 value is available for guidance, use it to select the closer root.
             actual_x1 <- filtered_data_y[[independent_vars]]
             calibration_value <- round(ifelse(abs(x1_sol1 - actual_x1) < abs(x1_sol2 - actual_x1), x1_sol1, x1_sol2), 4)
@@ -10736,7 +10906,7 @@ server <- function(input, output, session) {
             actual_y <- filtered_data_y[[dependent_var]]
             # Define a function for cubic interactive model:
             # Model: y = (b0+b4*x2) + x1*(b1+b5*x2) + x1^2*(b2+b6*x2) + x1^3*(b3+b7*x2)
-            cubic_fn <- function(x, y, x2) {
+            cubic_fn2 <- function(x, y, x2) {
               # Build the calibration prediction based on x1 (x) and known x2
               pred <- (coefficients[1] + coefficients[5] * x2) +
                       (coefficients[2] + coefficients[6] * x2) * x +
@@ -10749,7 +10919,7 @@ server <- function(input, output, session) {
             calibration_value <- sapply(seq_along(actual_y), function(i) {
               # Use the actual x1 as a starting point for optimization.
               result <- optim(par = actual_x1[i],
-                              fn = cubic_fn,
+                              fn = cubic_fn2,
                               y = actual_y[i],
                               x2 = x2_values[i],
                               method = "BFGS")
@@ -10799,9 +10969,8 @@ server <- function(input, output, session) {
         model <<- add_dataset_to_dictionary(model, id, corrected_data)
 
       }, error = function(e) {
-        output$message_area <- renderPrint({
-          cat("Error in regression:", e$message, sep = "\n")
-        })
+        append_message(capture.output(cat("Error in regression:", e$message,
+                                          sep = "\n")))
         showNotification(paste("Error in regression:", e$message), type = "error")
       })
     }
@@ -10872,7 +11041,7 @@ server <- function(input, output, session) {
     all_devices_data <- list()
 
     # Process each selected equation (device)
-    for (i in 1:seq_len(nrow(selected_equations))) {
+    for (i in seq_along(selected_equations)) {
       device_id <- selected_equations$Device_ID[i]
 
       device_data <- corrected_data[[device_id]]
@@ -10941,12 +11110,12 @@ server <- function(input, output, session) {
       reactive_ns_polygon(NULL)
 
       ## store plots in reactive values for download
-      reactive_leaflet_map <- reactiveVal(NULL)
-      reactive_time_series_plot <- reactiveVal(NULL)
-      reactive_calendar_series_plot <- reactiveVal(NULL)
-      reactive_calendar <- reactiveVal(NULL)
-      reactive_barchart <- reactiveVal(NULL)
-      reactive_barchart_aqi <- reactiveVal(NULL)
+      reactive_leaflet_map <<- reactiveVal(NULL)
+      reactive_time_series_plot <<- reactiveVal(NULL)
+      reactive_calendar_series_plot <<- reactiveVal(NULL)
+      reactive_calendar <<- reactiveVal(NULL)
+      reactive_barchart <<- reactiveVal(NULL)
+      reactive_barchart_aqi <<- reactiveVal(NULL)
 
       ## leaflet map; gray placeholders connected to layout.css
       shinyjs::show(id = "loading-networksum_map", anim = TRUE, animType = "fade")
@@ -10981,8 +11150,8 @@ server <- function(input, output, session) {
       dataset_dropdown1_txt(NULL)
 
       ## reactive values for download
-      reactive_time_variation <- reactiveVal(NULL)
-      reactive_scatterplot <- reactiveVal(NULL)
+      reactive_time_variation <<- reactiveVal(NULL)
+      reactive_scatterplot <<- reactiveVal(NULL)
 
       output$col_value1_txt <- renderText({NULL})
       col_value1_txt(NULL)
@@ -11005,8 +11174,8 @@ server <- function(input, output, session) {
       col_value2_txt(NULL)
 
       ## reactive values for download
-      reactive_time_variation <- reactiveVal(NULL)
-      reactive_scatterplot <- reactiveVal(NULL)
+      reactive_time_variation <<- reactiveVal(NULL)
+      reactive_scatterplot <<- reactiveVal(NULL)
 
       shinyjs::show(id = "loading-orig_timevar_plot", anim = TRUE, animType = "fade")
       shinyjs::runjs("document.getElementById('loading-orig_timevar_plot').style.display = 'block';")
@@ -11071,9 +11240,7 @@ server <- function(input, output, session) {
         if (data@coverage == input$dataset_dropdown) {
           dataset <- data_frame(data)
         } else {
-          output$message_area <- renderPrint({
-            cat("Error in dataset selection!", sep = "\n")
-          })
+          append_message("Error in dataset selection!")
         }
       }
       column_data(dataset)
@@ -11153,9 +11320,7 @@ server <- function(input, output, session) {
         if (data@coverage == dataset_name) {
           dataset <- data_frame(data)
         } else {
-          output$message_area <- renderPrint({
-            cat("Error in dataset selection!", sep = "\n")
-          })
+          append_message("Error in dataset selection!")
         }
       }
       column_data1(dataset)
@@ -11187,9 +11352,7 @@ server <- function(input, output, session) {
         if (data@coverage == dataset_name) {
           dataset <- data_frame(data)
         } else {
-          output$message_area <- renderPrint({
-            cat("Error in dataset selection!", sep = "\n")
-          })
+          append_message("Error in dataset selection!")
           showNotification(paste0("It seems the selected variable does not fit to the dataset: ", dataset_name), type = "error")
         }
       }
@@ -11315,10 +11478,7 @@ server <- function(input, output, session) {
         show("app-content")
 
       } else {
-          output$message_area <- renderPrint({
-            cat("Processing...", sep = "\n")
-          })
-
+        append_message("Processing...")
       }
 
       ## Future features: add the nod for ozone!!
@@ -11477,9 +11637,8 @@ server <- function(input, output, session) {
     content = function(file) {
       setwd(tempdir())
 
-      output$message_area <- renderPrint({
-        cat("temporary file generated in ", tempdir(), sep = "\n")
-      })
+      append_message(capture.output(cat("temporary file generated in ",
+                                        tempdir(), sep = "\n")))
 
       plot_list <- c()
 
@@ -11557,9 +11716,9 @@ server <- function(input, output, session) {
 
     content = function(file) {
       setwd(tempdir())
-      output$message_area <- renderPrint({
-        cat("temporary file generated in ", tempdir(), sep = "\n")
-      })
+      append_message(capture.output(cat("temporary file generated in ",
+                                        tempdir(), sep = "\n")))
+
       df_list <- c()
 
       ## create csv file for df
@@ -11636,11 +11795,18 @@ server <- function(input, output, session) {
       }
 
       ## calculate Mean and Max values for each lat/lon for the selected time period
+
+      the_max <- max(sub_df[[col_value_txt()]], na.rm = TRUE)
+
+      if (!is.finite(the_max)) {
+        the_max <- as.numeric(NA)
+      }
+
       new_df <- data.frame(
         lat = unique(sub_df$`latitude(deg)`),
         lon = unique(sub_df$`longitude(deg)`),
         Mean = mean(sub_df[[col_value_txt()]], na.rm = TRUE),
-        Max = max(sub_df[[col_value_txt()]], na.rm = TRUE),
+        Max = the_max,
         newid = unique(sub_df$newid),
         origid = unique(sub_df$`id(-)`)
       )
@@ -11668,9 +11834,7 @@ server <- function(input, output, session) {
 
   df_geojson <- function(polygon_sf, df_complete) {
 
-    output$message_area <- renderPrint({
-      cat("Filter data frame by GeoJSON. ", sep = "\n")
-    })
+    append_message("Filter data frame by GeoJSON.")
 
     ## convert the data frame into a spatial point feature using lat/lon coordinates
     points_sf <- sf::st_as_sf(df_complete, coords = c("lon", "lat"), crs = st_crs(polygon_sf), remove = FALSE)
@@ -11691,9 +11855,8 @@ server <- function(input, output, session) {
       df <- df_complete
 
     } else {
-      output$message_area <- renderPrint({
-        cat("Looks good! Measurement stations are found withing the GeoJSON!", sep = "\n")
-      })
+      append_message("Looks good! Measurement stations are found within the GeoJSON!")
+
       ## if dimension is not 0 go on with the new data frame and rename it to df
       df <- df0
       reactive_polygon(TRUE)
@@ -11753,7 +11916,7 @@ server <- function(input, output, session) {
     ## Future opportunities: Add a drop down with color schemes
     colpal <- colorNumeric(
       palette = c("gray", "#F80003", "#bf0000"),
-      na.color = "blue",
+      na.color = "black",
       domain = df[[sel_column]],
       reverse = FALSE
     )
@@ -11804,8 +11967,6 @@ server <- function(input, output, session) {
       ## the title will change based on the selection after clicking on "Show Map"
       addControl(paste0(dataset_dropdown_txt(), " (", sel_column, ")"), position = "bottomleft", className = "map-title") %>%
 
-      #setView(lng = -74.05, lat = 40.72, zoom = 11) %>%
-
       setMaxBounds(-180.0, -90.0, 180.0, 90.0) %>%
 
       ## zoom in and out feature
@@ -11852,9 +12013,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
 
       ## convert the polygon into a spatial feature
       polygon_sf <- sf::read_sf(input$GeoJSON$datapath)
@@ -11897,9 +12056,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
 
       ## rename the lat/lon columns
       df_complete["lat"] <- df_complete$`latitude(deg)`
@@ -11912,10 +12069,7 @@ server <- function(input, output, session) {
       df <- df_geojson(polygon_sf, df_complete)
 
     } else {
-      output$message_area <- renderPrint({
-        cat("No input GeoJSON!", sep = "\n")
-      })
-
+      append_message("No input GeoJSON!")
       df <- df_complete
     }
 
@@ -11944,9 +12098,7 @@ server <- function(input, output, session) {
       #breakpoint <- ASNAT_ozone_8_hour_aqi_breakpoints
 
     } else {
-      output$message_area <- renderPrint({
-        cat("No match!", sep = "\n")
-      })
+      append_message("No match!")
     }
 
     ## add information about the air quality based on the breakpoint to empty data frame
@@ -12040,10 +12192,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
 
       ## rename lat/lon columns
       df_complete["lat"] <- df_complete$`latitude(deg)`
@@ -12056,9 +12205,7 @@ server <- function(input, output, session) {
       df <- df_geojson(polygon_sf, df_complete)
 
     } else {
-      output$message_area <- renderPrint({
-        cat("No input GeoJSON!", sep = "\n")
-      })
+      append_message("No input GeoJSON!")
       df <- df_complete
     }
 
@@ -12098,9 +12245,7 @@ server <- function(input, output, session) {
         ts_hourlymean_df <- rbind(ts_hourlymean_df, new_df)
 
       } else {
-        output$message_area <- renderPrint({
-            cat("Data frame empty! Process next day!", sep = "\n")
-          })
+        append_message("Data frame empty! Process next day!")
       }
     }
 
@@ -12130,9 +12275,7 @@ server <- function(input, output, session) {
         ts_dailymean_df <- rbind(ts_dailymean_df, new_df)
 
       } else {
-        output$message_area <- renderPrint({
-            cat("Data frame empty! Process next day!", sep = "\n")
-        })
+        append_message("Data frame empty! Process next day!")
       }
     }
 
@@ -12150,7 +12293,7 @@ server <- function(input, output, session) {
       #   expand = c(0.01, 0)  # Minimal expansion
       # ) +
       scale_x_datetime(labels = scales::date_format("%Y-%m-%d")) +
-      scale_color_manual(name = "", 
+      scale_color_manual(name = "",
                 values = c("Daily Average" = "black", "Hourly Average" = "gray65")) +
       xlab("") + ylab(value) +
       {if (polygon == TRUE) ggtitle(paste0(dataset_dropdown_txt(), " within GeoJSON"))} +
@@ -12174,9 +12317,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
 
       ## rename lat/lon column
       df_complete["lat"] <- df_complete$`latitude(deg)`
@@ -12189,9 +12330,7 @@ server <- function(input, output, session) {
       df <- df_geojson(polygon_sf, df_complete)
 
     } else {
-      output$message_area <- renderPrint({
-        cat("No input GeoJSON!", sep = "\n")
-      })
+      append_message("No input GeoJSON!")
       df <- df_complete
     }
 
@@ -12229,9 +12368,7 @@ server <- function(input, output, session) {
         calendar_dailymean_df <- rbind(calendar_dailymean_df, new_df)
 
       } else {
-        output$message_area <- renderPrint({
-          cat("Subset data frame empty! Process next day!", sep = "\n")
-        })
+        append_message("Subset data frame empty! Process next day!")
       }
     }
 
@@ -12324,9 +12461,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
       ## rename lat/lon column
       df_complete["lat"] <- df_complete$`latitude(deg)`
       df_complete["lon"] <- df_complete$`longitude(deg)`
@@ -12338,10 +12473,7 @@ server <- function(input, output, session) {
       df <- df_geojson(polygon_sf, df_complete)
 
     } else {
-      output$message_area <- renderPrint({
-        cat("No input GeoJSON!", sep = "\n")
-      })
-
+      append_message("No input GeoJSON!")
       df <- df_complete
     }
 
@@ -12376,10 +12508,7 @@ server <- function(input, output, session) {
         )
         calendar_dailymean_df <- rbind(calendar_dailymean_df, new_df)
       } else {
-        output$message_area <- renderPrint({
-          cat("Subset data frame empty! Process next day!", sep = "\n")
-        })
-
+        append_message("Subset data frame empty! Process next day!")
       }
     }
 
@@ -12405,7 +12534,7 @@ server <- function(input, output, session) {
 
     calculate_aqi <- FALSE
     var_name <- col_value_txt()
-    # Check AQI colors 
+    # Check AQI colors
     if ((input$calendar_sel == "value_aqi" || input$calendar_sel == "date_aqi") && grepl("pm25|pm10", tolower(var_name))) {
       calculate_aqi <- TRUE
       # Determine which breakpoints to use
@@ -12420,13 +12549,13 @@ server <- function(input, output, session) {
         c(-Inf, breakpoints),
         labels = ASNAT_aqi_names
       )
-      
+
       # Convert to factor with correct levels for proper ordering
       calendar_dailymean_df$aqi_category <- factor(
         calendar_dailymean_df$aqi_category,
         levels = ASNAT_aqi_names
       )
-      
+
       # Map categories to numerical indices for plotting
       calendar_dailymean_df$aqi_index <- as.integer(calendar_dailymean_df$aqi_category)
     }
@@ -12471,9 +12600,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
 
       df1_complete["lat"] <- df1_complete$`latitude(deg)`
       df1_complete["lon"] <- df1_complete$`longitude(deg)`
@@ -12501,9 +12628,7 @@ server <- function(input, output, session) {
 
       ## check if both data frames are not empty
       if (dim(df01)[1] != 0 && dim(df02)[1] != 0) {
-        output$message_area <- renderPrint({
-          cat("Looks good! Measurement stations are found withing the GeoJSON!", sep = "\n")
-        })
+        append_message("Looks good! Measurement stations are found within the GeoJSON!")
 
         df1 <- df01
         df2 <- df02
@@ -12542,9 +12667,7 @@ server <- function(input, output, session) {
     hourly_mean_df1 <- data.frame()
     hourly_mean_df2 <- data.frame()
 
-    output$message_area <- renderPrint({
-      cat("Start generating hourly means!", sep = "\n")
-    })
+    append_message("Start generating hourly means!")
 
     ## create data frame for df1; this is necessary to carry out the merge of df1 and df2
     for (idx1 in seq(1, length(datetime_l1))) {
@@ -12597,9 +12720,7 @@ server <- function(input, output, session) {
       names(merged_df)[names(merged_df) == "variable_2"] <- dfn2
     }
 
-    output$message_area <- renderPrint({
-      cat("Process plot!", sep = "\n")
-    })
+    append_message("Process plot!")
 
     ## create time variation plot based on the merged data frame using the openair library
     plot <- openair::timeVariation(merged_df, pollutant = c(dfn1, dfn2), ylab = NULL)
@@ -12620,9 +12741,7 @@ server <- function(input, output, session) {
     ## check if user only wants to carry out the analysis only for features in the GeoJSON (YES)
     ## check if a GeoJSON file is available (POLYGON)
     if (reactive_ns_polygon() == "Yes" && !is.null(input$GeoJSON)) {
-      output$message_area <- renderPrint({
-        cat("Filter data frame by GeoJSON", sep = "\n")
-      })
+      append_message("Filter data frame by GeoJSON")
 
       df1_complete["lat"] <- df1_complete$`latitude(deg)`
       df1_complete["lon"] <- df1_complete$`longitude(deg)`
@@ -12650,9 +12769,7 @@ server <- function(input, output, session) {
 
       ## check if both data frames are not empty
       if (dim(df01)[1] != 0 && dim(df02)[1] != 0) {
-        output$message_area <- renderPrint({
-          cat("Looks good! Measurement stations are found withing the GeoJSON!", sep = "\n")
-        })
+        append_message("Looks good! Measurement stations are found within the GeoJSON!")
 
         df1 <- df01
         df2 <- df02
@@ -12691,9 +12808,7 @@ server <- function(input, output, session) {
     hourly_mean_df1 <- data.frame()
     hourly_mean_df2 <- data.frame()
 
-    output$message_area <- renderPrint({
-      cat("Start generating hourly means!", sep = "\n")
-    })
+    append_message("Start generating hourly means!")
 
     ## create data frame for df1; this is necessary to carry out the merge of df1 and df2
     for (idx1 in seq(1, length(datetime_l1))) {

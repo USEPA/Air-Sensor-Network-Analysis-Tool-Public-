@@ -20,15 +20,12 @@ source("ASNAT_DatasetManager.R") # For class ASNAT_DatasetManager.
 # Load required libraries:
 ###############################################################################
 
-# URL to download any required R packages from:
-
-repository <- "http://cran.us.r-project.org"
-
 library(methods)
 
 if (ASNAT_is_remote_hosted) {
   library(jsonlite) # For jsonlite::toJSON().
 } else {
+  repository <- "http://cran.us.r-project.org"
   if (!require(jsonlite)) install.packages("jsonlite", repos = repository)
 }
 
@@ -614,11 +611,17 @@ function(data_subdirectory = NULL) {
     timestep <- timesteps - 1L
   }
 
-  dataset_manager <-
-    ASNAT_DatasetManager(app_directory, data_subdirectory)
+  dataset_manager <- ASNAT_DatasetManager(app_directory, data_subdirectory)
 
-  purple_air_sites_data_frame <-
-    retrieve_purple_air_sites(dataset_manager, start_date, purple_air_key)
+  # If the dataset_manager was able to connect to rsigserver and
+  # there is a purple air key then get the list of all purple air sites:
+
+  purple_air_sites_data_frame <- data.frame()
+
+  if (current_version(dataset_manager) > 0L && nchar(purple_air_key) > 0L) {
+    purple_air_sites_data_frame <-
+      retrieve_purple_air_sites(dataset_manager, start_date, purple_air_key)
+  }
 
   object <- new("ASNAT_Model",
                 app_directory = app_directory,
@@ -983,6 +986,22 @@ function(object, dataset_name) {
 })
 
 
+# Get index of named dataset (or 0L if not found):
+# the_dataset <- dataset_index(model, dataset_name)
+
+ASNAT_declare_method("ASNAT_Model", "dataset_index",
+function(object, dataset_name) {
+  result <- 0L
+
+  if (dataset_count(object) > 0L) {
+    coverages <- dataset_coverages(object)
+    result <- which(coverages == dataset_name)
+  }
+
+  return(result)
+})
+
+
 # Get coverage of each stored dataset:
 
 ASNAT_declare_method("ASNAT_Model", "dataset_coverages",
@@ -1188,13 +1207,18 @@ function(object) object@aqi_statistics_subtitle)
 ASNAT_declare_method("ASNAT_Model", "aqi_statistics_data_frame",
 function(object) object@aqi_statistics_data_frame)
 
+# Get rsigserver (webservice) URL:
+
+ASNAT_declare_method("ASNAT_Model", "rsigserver_url",
+function(object) rsigserver_url(object@dataset_manager))
+
 # Get download URL of this application:
 
 ASNAT_declare_method("ASNAT_Model", "download_url",
 function(object) download_url(object@dataset_manager))
 
 
-# What version of ASNAT are we running?
+# What version (YYYYMMDD) of ASNAT are we running?
 
 ASNAT_declare_method("ASNAT_Model", "version",
 function(object) {
@@ -1205,33 +1229,10 @@ function(object) {
 })
 
 
-# What version of ASNAT is available on rsigserver?
+# What version (YYYYMMDD) of ASNAT is available on rsigserver?
 
-ASNAT_declare_method("ASNAT_Model", "public_version",
+ASNAT_declare_method("ASNAT_Model", "current_version",
 function(object) current_version(object@dataset_manager))
-
-
-# Is there a newer version of ASNAT available for download?
-
-ASNAT_declare_method("ASNAT_Model", "is_newer_version_available",
-function(object) {
-
-  # If ASNAT is deployed as a remote hosted client-server app then
-  # the user is accessing the current version.
-  # Otherwise if ASNAT is deployed as a local app then compare the version
-  # vs the public version.
-
-  if (ASNAT_is_remote_hosted) {
-    result <- FALSE
-  } else {
-    this_version <- version(object)
-    the_public_version <- public_version(object)
-    result <- the_public_version > this_version
-  }
-
-  return(result)
-})
-
 
 
 # Setters:
@@ -2144,6 +2145,25 @@ function(object, dataset_index, variable_column) {
 
 
 
+# Replace a dataset:
+# asnat_model <<- replace_dataset(asnat_model, dataset_index, dataset)
+
+ASNAT_declare_method("ASNAT_Model", "replace_dataset",
+function(object, dataset_index, dataset) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(dataset_index > 0L)
+  stopifnot(dataset_index <= count(object@dataset_manager))
+  stopifnot(class(dataset) == "ASNAT_Dataset")
+
+  object@dataset_manager <-
+    replace_dataset(object@dataset_manager, dataset_index, dataset)
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
 # Set equation for a specific ID
 # Example: set_id_equation(asnat_model, id, equation_info)
 
@@ -2524,7 +2544,7 @@ ASNAT_declare_method("ASNAT_Model", "compare_datasets",
 function(object, dataset_x_name, dataset_x_variable,
          dataset_y_name, dataset_y_variable,
          dataset_z_name = NULL, dataset_z_variable = NULL,
-         regression_method = NULL ) {
+         regression_method = NULL) {
 
   timer <- ASNAT_start_timer()
   ASNAT_check(methods::validObject(object))
@@ -2792,12 +2812,12 @@ function(object, dataset_x_name, dataset_x_variable,
           timestamps_z <- data_frame_z[, 1L]
 
           timestamps_z <- substr(timestamps_z, 1L, timestamp_length)
-          
+
           sites_z <- as.integer(data_frame_z[, site_column_z])
           measures_z <- data_frame_z[, measure_column_z]
           count <- length(match_sites)
-          matched_measures_z <- rep(NA, count)
-          sites_z_matched <- rep(NA, count)
+          matched_measures_z <- rep(as.numeric(NA), count)
+          sites_z_matched <- rep(as.integer(NA), count)
           longitudes_z <- data_frame_z[, 2L]
           latitudes_z <- data_frame_z[, 3L]
 
@@ -2831,6 +2851,12 @@ function(object, dataset_x_name, dataset_x_variable,
           c("timestamp(UTC)", x_id_label, x_label, y_id_label, y_label,
             y_flagged_label)
       }
+
+      # Remove rows with NA in measures_x/y:
+
+      object@comparison_data_frame <-
+        object@comparison_data_frame[complete.cases(object@comparison_data_frame[
+                                     , c(3L, 5L)]), ]
 
       directory <- data_directory(object@dataset_manager)
       file_format <- "tsv"
@@ -2875,7 +2901,8 @@ function(object, dataset_x_name, dataset_x_variable,
 
           for (site_y in unique_sites_y) {
             paired_sites_rows <-
-                which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+              which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                    !is.na(measures_x) & !is.na(measures_y))
 
             n <- length(paired_sites_rows)
 
@@ -2888,20 +2915,20 @@ function(object, dataset_x_name, dataset_x_variable,
         # Allocate vector outputs:
 
         x_ids <- rep(0L, count)
-        x_longitudes <- rep(NA, count)
-        x_latitudes <- rep(NA, count)
+        x_longitudes <- rep(as.numeric(NA), count)
+        x_latitudes <- rep(as.numeric(NA), count)
         y_ids <- rep(0L, count)
-        y_longitudes <- rep(NA, count)
-        y_latitudes <- rep(NA, count)
-        distances <- rep(NA, count)
-        r2s <- rep(NA, count)
+        y_longitudes <- rep(as.numeric(NA), count)
+        y_latitudes <- rep(as.numeric(NA), count)
+        distances <- rep(as.numeric(NA), count)
+        r2s <- rep(as.numeric(NA), count)
         equations <- rep(NULL, count)
 
         if (!is.null(matched_measures_z)) {
           z_ids <- rep(0L, count)
-          z_longitudes <- rep(NA, count)
-          z_latitudes <- rep(NA, count)
-          z_distances <- rep(NA, count)
+          z_longitudes <- rep(as.numeric(NA), count)
+          z_latitudes <- rep(as.numeric(NA), count)
+          z_distances <- rep(as.numeric(NA), count)
         }
 
         quadratic_regression <- FALSE
@@ -2927,7 +2954,8 @@ function(object, dataset_x_name, dataset_x_variable,
             # if single variable regression
             if (object@correction_selection == 0L) {
               site_rows <-
-                which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+                which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                      !is.na(measures_x) & !is.na(measures_y))
 
               if (length(site_rows) > 0L) {
                 site_measures_x <- measures_x[site_rows]
@@ -2988,7 +3016,8 @@ function(object, dataset_x_name, dataset_x_variable,
               # object@correction_selection == 2 is interactive
 
               site_rows <-
-                which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+                which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                      !is.na(measures_x) & !is.na(measures_y))
 
               if (length(site_rows) > 0L &&
                   sum(!is.na(measures_x[site_rows])) /
@@ -3006,7 +3035,7 @@ function(object, dataset_x_name, dataset_x_variable,
                 sample_size <- length(site_measures_x)
 
                 if (sample_size > 15L && !all(is.na(site_measures_z))) {
-                  
+
                   if (object@correction_selection == 1L) {
                     # Additive
 
@@ -3026,7 +3055,7 @@ function(object, dataset_x_name, dataset_x_variable,
                     }
                   } else if (object@correction_selection == 2L) {
                     # interactive
-                  
+
                     if (quadratic_regression) {
                       lm_model <- lm(site_measures_y ~ (site_measures_x + I(site_measures_x^2)) * site_measures_z)
                       # coefficients <- coef(lm_model)
@@ -3163,7 +3192,8 @@ function(object, dataset_x_name, dataset_x_variable,
       if (object@ok &&
           ASNAT_is_aqi_compatible(dataset_x_variable, dataset_y_variable)) {
         object@ok <- FALSE
-        unflagged_rows <- which(flagged_y == "0")
+        unflagged_rows <-
+          which(flagged_y == "0" & !is.na(measures_x) & !is.na(measures_y))
         unflagged_measures_x <- measures_x[unflagged_rows]
         unflagged_measures_y <- measures_y[unflagged_rows]
         is_hourly <- object@timestep_size == "hours"

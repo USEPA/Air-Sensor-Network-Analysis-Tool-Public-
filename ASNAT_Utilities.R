@@ -44,10 +44,10 @@ if (ASNAT_use_cpp_functions) {
     if (!require(Rcpp)) install.packages("Rcpp", repos = repository)
   }
 
-  Rcpp::sourceCpp(code = '
+  Rcpp::sourceCpp(code = "
   #include <Rcpp.h>
   // [[Rcpp::export]]
-  bool RTools_is_installed_and_c_plus_plus_compiler_works() {return true;}')
+  bool RTools_is_installed_and_c_plus_plus_compiler_works() {return true;}")
 
   stopifnot(RTools_is_installed_and_c_plus_plus_compiler_works())
 
@@ -86,6 +86,7 @@ ASNAT_na_strings <-
 
 # When ASNAT outputs data to a file, any NA values are converted to this:
 
+ASNAT_output_missing_value <- -9999.0
 ASNAT_output_missing_string <- "-9999.0"
 
 
@@ -376,7 +377,7 @@ ASNAT_is_aqi_variable <- function(variable_units) {
     result <- endsWith(variable_units, "(ppb)")
   }
 
-  ASNAT_dprint("  result = %d", as.integer(result))
+  ASNAT_dprint("  result = %d\n", as.integer(result))
   return(result)
 }
 
@@ -450,12 +451,15 @@ ASNAT_aqi_data_indices <- function(values, breakpoints) {
   for (index in seq_along(values)) {
     value <- values[[index]]
 
-    for (aqi_index in seq_along(breakpoints)) {
-      aqi_breakpoint <- breakpoints[[aqi_index]]
+    if (!is.na(value)) {
 
-      if (value <= aqi_breakpoint) {
-        result[[index]] <- aqi_index
-        break
+      for (aqi_index in seq_along(breakpoints)) {
+        aqi_breakpoint <- breakpoints[[aqi_index]]
+
+        if (value <= aqi_breakpoint) {
+          result[[index]] <- aqi_index
+          break
+        }
       }
     }
   }
@@ -467,7 +471,9 @@ ASNAT_aqi_data_indices <- function(values, breakpoints) {
 
 
 
-# Define function to get AQI colors of values given breakpoints:
+# Define function to get AQI colors of values given breakpoints.
+# Note NA values will be black (not some other custom color) because black
+# glyph png files exist.
 
 ASNAT_aqi_data_colors <- function(values, breakpoints, colormap) {
   ASNAT_dprint("ASNAT_aqi_data_colors():")
@@ -488,20 +494,16 @@ ASNAT_aqi_data_colors <- function(values, breakpoints, colormap) {
   for (index in seq_along(values)) {
     value <- values[[index]]
 
-    # Skip NA values - assign a default color
+    if (!is.na(value)) {
 
-    if (is.na(value)) {
-      result[[index]] <- "#858585"
-      next
-    }
+      for (color_index in seq_along(breakpoints)) {
+        aqi_breakpoint <- breakpoints[[color_index]]
+        aqi_color <- colormap[[color_index]]
 
-    for (color_index in seq_along(breakpoints)) {
-      aqi_breakpoint <- breakpoints[[color_index]]
-      aqi_color <- colormap[[color_index]]
-
-      if (value <= aqi_breakpoint) {
-        result[[index]] <- aqi_color
-        break
+        if (value <= aqi_breakpoint) {
+          result[[index]] <- aqi_color
+          break
+        }
       }
     }
   }
@@ -782,10 +784,12 @@ ASNAT_neighbor_statistics <- function(neighbors_data_frame, only_unflagged) {
 
       if (only_unflagged) {
         paired_sites_rows <-
-          which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+          which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                !is.na(measures_x) & !is.na(measures_y))
       } else {
         paired_sites_rows <-
-          which(sites_x == site_x & sites_y == site_y)
+          which(sites_x == site_x & sites_y == site_y &
+                !is.na(measures_x) & !is.na(measures_y))
       }
 
       n <- length(paired_sites_rows)
@@ -801,11 +805,11 @@ ASNAT_neighbor_statistics <- function(neighbors_data_frame, only_unflagged) {
     # Allocate result data.frame:
 
     result <- data.frame(site = rep(0L, count),
-                         R2 = rep(NA, count),
-                         slope = rep(NA, count),
-                         intercept = rep(NA, count),
-                         RMSE = rep(NA, count),
-                         NRMSE = rep(NA, count))
+                         R2 = rep(as.numeric(NA), count),
+                         slope = rep(as.numeric(NA), count),
+                         intercept = rep(as.numeric(NA), count),
+                         RMSE = rep(as.numeric(NA), count),
+                         NRMSE = rep(as.numeric(NA), count))
 
     index <- 0L
 
@@ -815,10 +819,12 @@ ASNAT_neighbor_statistics <- function(neighbors_data_frame, only_unflagged) {
 
         if (only_unflagged) {
           paired_sites_rows <-
-            which(sites_x == site_x & sites_y == site_y & flagged_y == "0")
+            which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                  !is.na(measures_x) & !is.na(measures_y))
         } else {
           paired_sites_rows <-
-            which(sites_x == site_x & sites_y == site_y)
+            which(sites_x == site_x & sites_y == site_y &
+                 !is.na(measures_x) & !is.na(measures_y))
         }
 
         n <- length(paired_sites_rows)
@@ -899,7 +905,8 @@ ASNAT_platform <- function() {
 # Use curl program to retrieve data from url to a file and return TRUE if
 # successful else FALSE.
 
-ASNAT_http_get_curl <- function(url, timeout_seconds, output_file_name) {
+ASNAT_http_get_curl <-
+  function(url, timeout_seconds, output_file_name, silent = FALSE) {
   stopifnot(nchar(url) > 0L)
   stopifnot(timeout_seconds >= 0L)
   stopifnot(nchar(output_file_name) > 0L)
@@ -932,8 +939,8 @@ ASNAT_http_get_curl <- function(url, timeout_seconds, output_file_name) {
   ASNAT_dprint("status = %d\n", status)
   result <- status == 0L
 
-  if (!result) {
-    cat(sep = "", file = stderr(), "Failed to retrieve data from:\n", url, "\n")
+  if (!result && !silent) {
+    ASNAT_warning(paste0("Failed to retrieve data from:\n", url, "\n"))
   }
 
   ASNAT_dprint("ASNAT_http_get_curl() returning result = %d\n", result)
@@ -944,34 +951,41 @@ ASNAT_http_get_curl <- function(url, timeout_seconds, output_file_name) {
 
 # Retrieve data from a url to a file and return TRUE if successful else FALSE.
 
-ASNAT_http_get <- function(url, timeout_seconds, output_file_name) {
+ASNAT_http_get <-
+  function(url, timeout_seconds, output_file_name, silent = FALSE) {
   stopifnot(nchar(url) > 0L)
   stopifnot(timeout_seconds >= 0L)
   stopifnot(nchar(output_file_name) > 0L)
   result <- FALSE
 
   if (ASNAT_use_curl_program) {
-    result <- ASNAT_http_get_curl(url, timeout_seconds, output_file_name)
+    result <-
+      ASNAT_http_get_curl(url, timeout_seconds, output_file_name, silent)
   } else {
-    ASNAT_dprint("httr::GET(%s, timeout = %d)\n", url, timeout_seconds)
-    response <- httr::GET(url, httr::timeout(timeout_seconds))
-    status <- httr::status_code(response)
-    ASNAT_dprint("status = %d\n", status)
+    result <- is.logical(try(httr::http_error(url), silent = TRUE))
+    ASNAT_dprint("tested %s reachable = %d\n", url, result)
 
-    if (status == 200L) {
-      the_content <- httr::content(response, as = "text")
+    if (result) {
+      ASNAT_dprint("httr::GET(%s, timeout = %d)\n", url, timeout_seconds)
+      response <- httr::GET(url, httr::timeout(timeout_seconds))
+      status <- httr::status_code(response)
+      ASNAT_dprint("status = %d\n", status)
 
-      if (!is.null(the_content)) {
-        output_file <- file(output_file_name, "wb") # wb prevents \r chars.
-        try(silent = TRUE, writeLines(the_content, output_file))
-        close(output_file)
-        result <- file.size(output_file_name) > 0L
+      if (status == 200L) {
+        the_content <- httr::content(response, as = "text")
+
+        if (!is.null(the_content)) {
+          output_file <- file(output_file_name, "wb") # wb prevents \r chars.
+          try(silent = TRUE, writeLines(the_content, output_file))
+          close(output_file)
+          result <- file.size(output_file_name) > 0L
+        }
       }
     }
-  }
 
-  if (!result) {
-    cat(sep = "", file = stderr(), "Failed to retrieve data from:\n", url, "\n")
+    if (!result && !silent) {
+      ASNAT_warning(paste0("Failed to retrieve data from:\n", url, "\n"))
+    }
   }
 
   ASNAT_dprint("ASNAT_http_get() returning result = %d\n", result)
@@ -2836,14 +2850,26 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
       timestamp_last <- timestamps[[reported_count]]
       missing_percent <- (1.0 - reported_count / timesteps) * 100.0
       measures <- site_data_frame[[measure_column]]
-      minimum <- min(measures, na.rm = TRUE)
-      maximum <- max(measures, na.rm = TRUE)
-      mean_value <- mean(measures, na.rm = TRUE)
-      percentiles <-
-        stats::quantile(measures, na.rm = TRUE, probs = c(.25, .5, .75))
-      p25 <- percentiles[[1L]]
-      median_value <- percentiles[[2L]]
-      p75 <- percentiles[[3L]]
+      missing_percent <- 100.0
+      minimum <- ASNAT_output_missing_value
+      maximum <- ASNAT_output_missing_value
+      mean_value <- ASNAT_output_missing_value
+      p25 <- ASNAT_output_missing_value
+      median_value <- ASNAT_output_missing_value
+      p75 <- ASNAT_output_missing_value
+
+      if (!all(is.na(measures))) {
+        missing_percent <- (1.0 - reported_count / timesteps) * 100.0
+        minimum <- min(measures, na.rm = TRUE)
+        maximum <- max(measures, na.rm = TRUE)
+        mean_value <- mean(measures, na.rm = TRUE)
+        percentiles <-
+          stats::quantile(measures, na.rm = TRUE, probs = c(.25, .5, .75),
+                          type = 5L)
+        p25 <- percentiles[[1L]]
+        median_value <- percentiles[[2L]]
+        p75 <- percentiles[[3L]]
+      }
 
       cat(sep = "", file = output_file, append = TRUE,
           site_id, delimiter,
@@ -2851,12 +2877,12 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
           timestamp_last, delimiter,
           reported_count, delimiter,
           round(missing_percent), delimiter,
-          round(mean_value, 1L), delimiter,
-          round(minimum, 1L), delimiter,
-          round(p25, 1L), delimiter,
-          round(median_value, 1L), delimiter,
-          round(p75, 1L), delimiter,
-          round(maximum, 1L))
+          round(mean_value, digits = 2L), delimiter,
+          round(minimum, digits = 2L), delimiter,
+          round(p25, digits = 2L), delimiter,
+          round(median_value, digits = 2L), delimiter,
+          round(p75, digits = 2L), delimiter,
+          round(maximum, digits = 2L))
 
       if (compare) {
         cat(sep = "", file = output_file, append = TRUE,
@@ -3170,6 +3196,46 @@ ASNAT_validate_input_data_frame <- function(data_frame) {
                   failure <-
                     paste0("timestamps must be valid YYYY-MM-DDTHH:MM:SS-0000",
                            " and in increasing order.\n")
+                } else {
+
+                  # Check that each site has at most one row per hour:
+
+                  timestamps <- substr(timestamps, 1L, 13L)
+                  first_timestamp <- timestamps[[1L]]
+                  last_timestamp <- timestamps[[length(timestamps)]]
+                  stopifnot(last_timestamp >= first_timestamp)
+                  first_time <-
+                    as.POSIXct(first_timestamp, format = "%Y-%m-%dT%H")
+                  last_time <-
+                    as.POSIXct(last_timestamp, format = "%Y-%m-%dT%H")
+                  timesteps <- 1L +
+                    as.integer(difftime(last_time, first_time, units = "hours"))
+                  stopifnot(timesteps >= 1L)
+                  complete_timestamps <-
+                    format(seq(first_time, last_time, "hours"),
+                               format = "%Y-%m-%dT%H")
+
+                  sites <- data_frame[[id_column]]
+                  unique_sites <- unique(sort.int(sites))
+
+                  for (site in unique_sites) {
+
+                    for (timestep in 1L:timesteps) {
+                      timestamp <- complete_timestamps[[timestep]]
+                      matched_rows <-
+                        which(sites == site & timestamps == timestamp)
+
+                      if (length(matched_rows) > 1L) {
+                        failure <- "Sites must have at most one row per hour.\n"
+                        ok <- FALSE
+                        break
+                      }
+                    }
+
+                    if (!ok) {
+                      break
+                    }
+                  }
                 }
               }
             }
@@ -3789,3 +3855,143 @@ ASNAT_import <- function(file_list_data_frame, aggregate, longitude, latitude) {
   ASNAT_elapsed_timer("ASNAT_import:", timer)
   return(result)
 }
+
+
+
+# Get list of Nowcast parameters for given variable and units else NULL.
+# https://forum.airnowtech.org/t/the-nowcast-for-pm2-5-and-pm10/172
+# "The Nowcast values are then truncated to 1 ug/m3 for PM10
+# or 0.1 ug/m3 for PM2.5."
+# nowcast_parameters <- ASNAT_nowcast_parameters("pm25_corrected_hourly(ug/m3)")
+# if (!is.null(nowcast_parameters) {
+#   window_hours = nowcast_parameters$window_hours
+#   minimum_weight_factor = nowcast_parameters$minimum_weight_factor
+#   digits = nowcast_parameters$digits
+# }
+
+ASNAT_nowcast_parameters <- function(variable_units) {
+  ASNAT_dprint("ASNAT_nowcast_parameters():")
+  stopifnot(!is.null(variable_units))
+
+  result <- NULL
+
+  if (!grepl("_nowcast(", variable_units, fixed = TRUE)) {
+
+    if (startsWith(variable_units, "pm10") ||
+        grepl(".pm10", variable_units, fixed = TRUE) &&
+        endsWith(variable_units, "(ug/m3)")) {
+      result <-
+        list(window_hours = 12L, minimum_weight_factor = 0.5, digits = 0L)
+    } else if (startsWith(variable_units, "pm25") ||
+               grepl(".pm25", variable_units, fixed = TRUE) &&
+               endsWith(variable_units, "(ug/m3)")) {
+      result <-
+        list(window_hours = 12L, minimum_weight_factor = 0.5, digits = 1L)
+    } else if (startsWith(variable_units, "ozone") ||
+               grepl(".ozone", variable_units, fixed = TRUE) &&
+               endsWith(variable_units, "(ppb)")) {
+      result <-
+        list(window_hours = 8L, minimum_weight_factor = 0.0, digits = 0L)
+    }
+  }
+
+  ASNAT_debug(str, result)
+  return(result)
+}
+
+
+
+# Compute hourly Nowcast values from a vector of time-sorted consecutive hourly
+# values. NA must be used for 'missing' hourly values.
+# For PM10 use window_hours = 12, minimum_weight_factor = 0.5, digits = 0L
+# For PM25. use window_hours = 12, minimum_weight_factor = 0.5, digits = 1L
+# and for ozone, use window_hours = 8, minimum_weight_factor = 0.0, digits = 0L
+# Based on jonathan.s.callahan@gmail.com code downloaded on 2025-02-07 from:
+# https://rdrr.io/cran/AirMonitor/src/R/monitor_nowcast.R
+# The output is not an AQI (integer) but rather in the same units as the input
+# i.e., (ug/m3) for PM and (ppb) for ozone.
+# For all hours before the window, the Nowcast value cannot be computed and
+# will be NA.
+# See also:
+# https://www.epa.gov/sites/default/files/2018-01/documents/nowcastfactsheet.pdf
+# https://en.wikipedia.org/wiki/NowCast_(air_quality_index)
+
+ASNAT_compute_nowcast_callahan <-
+function(values, window_hours, minimum_weight_factor, digits) {
+  stopifnot(is.numeric(values))
+  stopifnot(is.numeric(window_hours))
+  stopifnot(length(window_hours) == 1L)
+  stopifnot(as.integer(window_hours) >= 3L)
+  stopifnot(length(values) >= window_hours)
+  stopifnot(is.numeric(minimum_weight_factor) &&
+            length(minimum_weight_factor) == 1L &&
+            minimum_weight_factor >= 0.0)
+  stopifnot(is.numeric(digits) &&
+            length(digits) == 1L &&
+            as.integer(digits) >= 0L &&
+            as.integer(digits) <= 12L)
+
+  window_hours <- as.integer(window_hours)
+  digits <- as.integer(digits)
+  truncation_scale <- 1L
+
+  if (digits > 1L) {
+    truncation_scale <- 10L^digits
+  }
+
+  count <- length(values)
+  result <- rep(as.numeric(NA), count)
+
+  for (index in count:window_hours) {
+    start_index <- 1L + index - window_hours
+
+    if (start_index < 1L) {
+      start_index <- 1L
+    }
+
+    window_values <- values[index:start_index]
+
+    if (sum(is.na(window_values[1L:3L])) < 2L) {
+      minimum <-  min(window_values, na.rm = TRUE)
+      maximum <-  max(window_values, na.rm = TRUE)
+      weight_factor <- 1.0 - (maximum - minimum) / maximum
+      weight_factor <- min(weight_factor, 1.0, na.rm = TRUE)
+      weight_factor <-
+        max(weight_factor, minimum_weight_factor, 0.0, na.rm = TRUE)
+
+      weighted_window_values <- rep(as.numeric(NA), window_hours)
+      weighted_window_factors <- rep(as.numeric(NA), window_hours)
+
+      for (window_index in 1L:window_hours) {
+        value <- window_values[[window_index]]
+
+        if (!is.na(value)) {
+          hour_weight_factor <- weight_factor ^ (window_index - 1L)
+          weighted_window_factors[[window_index]] <- hour_weight_factor
+          weighted_window_values[[window_index]] <- value * hour_weight_factor
+        }
+      }
+
+      weighted_value <-
+        sum(weighted_window_values, na.rm = TRUE) /
+        sum(weighted_window_factors, na.rm = TRUE)
+
+      truncated_value <- weighted_value
+
+      if (digits == 0L) {
+        truncated_value <- trunc(weighted_value)
+      } else if (digits == 1L) {
+        truncated_value <- trunc(weighted_value * 10.0) / 10.0
+      } else {
+        truncated_value <-
+          trunc(weighted_value * truncation_scale) / truncation_scale
+      }
+
+      result[[index]] <- truncated_value
+    }
+  }
+
+  return(result)
+}
+
+

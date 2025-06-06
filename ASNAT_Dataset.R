@@ -427,3 +427,133 @@ function(object, dataset2, total_timesteps, delta_meters, directory,
 
 
 
+# Compute and append _nowcast variable column of current variable and return
+# the modified dataset:
+
+ASNAT_declare_method("ASNAT_Dataset", "compute_hourly_nowcast",
+function(object) {
+  ASNAT_dprint("In ASNAT_Dataset compute_hourly_nowcast()\n")
+  stopifnot(methods::validObject(object))
+
+  the_data_frame <- object@data_frame
+  column_names <- colnames(the_data_frame)
+  the_variable_column <- object@variable_column
+  name_units <- column_names[[the_variable_column]]
+  nowcast_parameters <- ASNAT_nowcast_parameters(name_units)
+  parts <- unlist(strsplit(name_units, "[()]"))
+  nowcast_column_name <- paste0(parts[[1L]], "_nowcast(", parts[[2L]], ")")
+  column_names <- colnames(the_data_frame)
+
+  # Check if variable is nowcast-compatible and
+  # the nowcast variable is not already present.
+
+  if (!is.null(nowcast_parameters) &&
+      !is.element(nowcast_column_name, column_names)) {
+
+    # Insert column of nowcast measures (initialized to NA) before flagged
+    # or lsast column:
+
+    row_count <- nrow(the_data_frame)
+    nowcast_vector <- rep(as.numeric(NA), row_count)
+    flagged_column <- ASNAT_flagged_column_index(column_names)
+    before <- ifelse(flagged_column > 0L, flagged_column - 1L, column_count - 1L)
+    column_count <- length(column_names)
+    rest <- before + 1L
+    the_data_frame <- data.frame(the_data_frame[1L:before],
+                                 nowcast_column_name = nowcast_vector,
+                                 the_data_frame[rest:column_count],
+                                 check.names = FALSE, stringsAsFactors = FALSE)
+    the_nowcast_column <- rest
+    column_names <- colnames(the_data_frame)
+    column_names[[the_nowcast_column]] <- nowcast_column_name
+    colnames(the_data_frame) <- column_names
+    column_count <- column_count + 1L
+
+    # Compute nowcast value for each site hourly measure
+    # with NA used for missing site measure for that hour.
+    # Note that the data frame must be sorted by time but may have dropouts
+    # i.e., non-consecutive timestamps and also site may not have a measure
+    # at every timestep.
+
+    window_hours <- nowcast_parameters$window_hours
+    minimum_weight_factor <- nowcast_parameters$minimum_weight_factor
+    digits <- nowcast_parameters$digits
+    timestamps <- the_data_frame[[1L]]
+    timestamps <- substr(timestamps, 1L, 13L)
+    first_timestamp <- timestamps[[1L]]
+    last_timestamp <- timestamps[[length(timestamps)]]
+    stopifnot(last_timestamp >= first_timestamp)
+    first_time <- as.POSIXct(first_timestamp, format = "%Y-%m-%dT%H")
+    last_time <- as.POSIXct(last_timestamp, format = "%Y-%m-%dT%H")
+    timesteps <- 1L +
+      as.integer(difftime(last_time, first_time, units = "hours"))
+    stopifnot(timesteps >= 1L)
+    site_column <- ASNAT_site_column_index(column_names)
+    sites <- the_data_frame[[site_column]]
+    unique_sites <- unique(sort.int(sites))
+    measures_with_na <- rep(as.numeric(NA), timesteps)
+    complete_timestamps <-
+      format(seq(first_time, last_time, "hours"), format = "%Y-%m-%dT%H")
+
+    for (site in unique_sites) {
+      timer <- ASNAT_start_timer()
+      measures_with_na[1L:timesteps] <- as.numeric(NA)
+      ASNAT_elapsed_timer("assign NA:", timer)
+      timer <- ASNAT_start_timer()
+
+      if (ASNAT_use_cpp_functions) {
+        ASNAT_copy_site_measures_cpp(site, site_column, the_variable_column,
+                                     complete_timestamps, the_data_frame,
+                                     measures_with_na)
+      } else {
+
+        for (timestep in 1L:timesteps) {
+          timestamp <- complete_timestamps[[timestep]]
+          matched_rows <- which(sites == site & timestamps == timestamp) # SLOW
+
+          if (length(matched_rows) == 1L) {
+            site_measure <- the_data_frame[matched_rows, the_variable_column]
+            measures_with_na[[timestep]] <- site_measure
+          }
+        }
+      }
+
+      ASNAT_elapsed_timer("Copy site measures:", timer)
+      timer <- ASNAT_start_timer()
+      nowcast_measures <-
+        ASNAT_compute_nowcast_callahan(measures_with_na, window_hours,
+                                       minimum_weight_factor, digits)
+      ASNAT_elapsed_timer("Copy site ASNAT_compute_nowcast_callahan:", timer)
+      timer <- ASNAT_start_timer()
+
+      # Overwrite nowcast column measures for this site in the_data_frame:
+
+      if (ASNAT_use_cpp_functions) {
+        ASNAT_copy_nowcast_measures_cpp(site, site_column, the_nowcast_column,
+                                     complete_timestamps, nowcast_measures,
+                                     the_data_frame)
+      } else {
+
+        for (timestep in 1L:timesteps) {
+          timestamp <- complete_timestamps[[timestep]]
+          matched_rows <- which(sites == site & timestamps == timestamp) # SLOW
+
+          if (length(matched_rows) == 1L) {
+            the_data_frame[matched_rows, the_nowcast_column] <-
+              nowcast_measures[[timestep]]
+          }
+        }
+      }
+
+      ASNAT_elapsed_timer("Copy nowcast measures:", timer)
+    }
+
+    object@variable_column <- the_nowcast_column # Select new _nowcast variable.
+    object@data_frame <- the_data_frame
+  }
+
+  return(object)
+})
+
+
+

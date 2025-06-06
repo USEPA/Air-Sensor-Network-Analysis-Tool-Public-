@@ -384,4 +384,138 @@ Rcpp::List ASNAT_compare_datasets_cpp(const Rcpp::DataFrame& data_frame_x,
 
 
 
+/******************************************************************************
+PURPOSE: ASNAT_copy_site_measures_cpp - Copy a given site's measures for input
+         to Nowcast function to speed-up the Nowcast calculation of a dataset.
+INPUTS:  const int site                     Site number.
+         const int site_column              Column number (1-based) of site.
+         const int measure_column           Column number (1-based) of measure.
+         const Rcpp::StringVector& all_timestamps Sorted all yyyy-mm-ddThh.
+         const Rcpp::DataFrame& data_frame Data frame containing site, measure.
+         Rcpp::NumericVector& measures_with_na  All hourly NA.
+OUTPUTS: Rcpp::NumericVector& measures_with_na  All hourly site measures or NA.
+NOTES: The export comment below is required!
+******************************************************************************/
+
+// [[Rcpp::export]]
+void ASNAT_copy_site_measures_cpp(const int site,
+                                  const int site_column,
+                                  const int measure_column,
+                                  const Rcpp::StringVector& all_timestamps,
+                                  const Rcpp::DataFrame& data_frame,
+                                  Rcpp::NumericVector& measures_with_na) {
+
+  // Get pointers to internal storage to avoid object function-call overhead.
+  // Rcpp::StringVector::const_iterator is not a simple pointer to
+  // Rcpp::String
+  // and trying iterator -= offset results in a crash so just pass address of
+  // Rcpp::StringVector and index it with operator[].
+
+  const Rcpp::StringVector& site_timestamps(data_frame[0]);
+  const Rcpp::IntegerVector& sites(data_frame[site_column - 1]);
+  const Rcpp::NumericVector& measures(data_frame[measure_column - 1]);
+  const int* const sites_0 = sites.begin();
+  const double* const measures_0 = measures.begin();
+  double* const measures_with_na_0 = measures_with_na.begin();
+  const int timesteps = all_timestamps.length();
+  const int rows = sites.length();
+  const int timestamp_length = 13; // E.g., 2022-06-01T17.
+
+  for (int timestep = 0; timestep < timesteps; ++timestep) {
+    const Rcpp::String& timestamp(all_timestamps[timestep]);
+    const char* const c_timestamp = timestamp.get_cstring();
+
+    for (int row = 0; row < rows; ++row) {
+      const int row_site = sites_0[row];
+
+      if (row_site == site) {
+        const Rcpp::String& site_timestamp(site_timestamps[row]);
+        const char* const c_site_timestamp = site_timestamp.get_cstring();
+        const int timestamp_comparison =
+          strncmp(c_site_timestamp, c_timestamp, timestamp_length);
+
+        if (timestamp_comparison == 0) {
+          const double measure = measures_0[row];
+          measures_with_na_0[timestep] = measure;
+          row = rows - 1; // At most one site row per hour so stop looping.
+        } else if (timestamp_comparison > 0) {
+          row = rows - 1; // Timestamps are sorted so stop looping if past.
+        }
+      }
+    }
+  }
+}
+
+
+
+/******************************************************************************
+PURPOSE: ASNAT_copy_nowcast_measures_cpp - Copy a given site's nowcast output
+         from Nowcast function to speed-up the Nowcast calculation of a dataset
+INPUTS:  const int site                     Site number.
+         const int site_column              Column number (1-based) of site.
+         const int nowcast_column           Column number (1-based) of nowcast.
+         const Rcpp::StringVector& all_timestamps Sorted all yyyy-mm-ddThh.
+         const Rcpp::NumericVector& nowcast_with_na  All hourly site nowcast
+                                                     values or NA.
+         Rcpp::DataFrame& data_frame Data frame containing site, nowcast (=NA).
+OUTPUTS: Rcpp::DataFrame& data_frame Data frame containing site, nowcast.
+NOTES: The export comment below is required!
+******************************************************************************/
+
+// [[Rcpp::export]]
+void ASNAT_copy_nowcast_measures_cpp(const int site,
+                                     const int site_column,
+                                     const int nowcast_column,
+                                     const Rcpp::StringVector& all_timestamps,
+                                     const Rcpp::NumericVector& nowcast_with_na,
+                                     Rcpp::DataFrame& data_frame) {
+
+  // Get pointers to internal storage to avoid object function-call overhead.
+  // Rcpp::StringVector::const_iterator is not a simple pointer to
+  // Rcpp::String
+  // and trying iterator -= offset results in a crash so just pass address of
+  // Rcpp::StringVector and index it with operator[].
+
+  const Rcpp::StringVector& site_timestamps(data_frame[0]);
+  const Rcpp::IntegerVector& sites(data_frame[site_column - 1]);
+//Rcpp::NumericVector& nowcasts(data_frame[nowcast_column - 1]); // Why & wrong?
+  Rcpp::NumericVector nowcasts(data_frame[nowcast_column - 1]); // Why no &?
+  const int* const sites_0 = sites.begin();
+  double* const site_nowcasts_0 = nowcasts.begin();
+  const double* const nowcast_with_na_0 = nowcast_with_na.begin();
+  const int timesteps = all_timestamps.length();
+  const int rows = sites.length();
+  const int timestamp_length = 13; // E.g., 2022-06-01T17.
+
+  for (int timestep = 0; timestep < timesteps; ++timestep) {
+    const double nowcast = nowcast_with_na_0[timestep];
+
+    // Since the data_frame nowcast column vector is already initialized to NA
+    // there is no need to search and overwrite it with NA.
+
+    if (!R_IsNA(nowcast)) {
+      const Rcpp::String& timestamp(all_timestamps[timestep]);
+      const char* const c_timestamp = timestamp.get_cstring();
+
+      for (int row = 0; row < rows; ++row) {
+        const int row_site = sites_0[row];
+
+        if (row_site == site) {
+          const Rcpp::String& site_timestamp(site_timestamps[row]);
+          const char* const c_site_timestamp = site_timestamp.get_cstring();
+          const int timestamp_comparison =
+            strncmp(c_site_timestamp, c_timestamp, timestamp_length);
+
+          if (timestamp_comparison == 0) {
+            site_nowcasts_0[row] = nowcast;
+            row = rows - 1; // At most one site row per hour so stop looping.
+          } else if (timestamp_comparison > 0) {
+            row = rows - 1; // Timestamps are sorted so stop looping if past.
+          }
+        }
+      }
+    }
+  }
+}
+
 
