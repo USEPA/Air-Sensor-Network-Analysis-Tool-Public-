@@ -24,10 +24,11 @@ library(methods)
 
 if (ASNAT_is_remote_hosted) {
   library(seismicRoll) # For seismicRoll::findOutliers().
+  library(MazamaSpatialUtils) # For subsetting by state, county, tribe.
 } else {
   if (!require(seismicRoll)) install.packages("seismicRoll", repos = repository)
+  if (!require(MazamaSpatialUtils)) install.packages("MazamaSpatialUtils", repos = repository)
 }
-
 
 ############################# Tunable Parameters ##############################
 
@@ -55,7 +56,7 @@ if (ASNAT_use_cpp_functions) {
 }
 
 # Use curl program to get data from webservices?
-# If TRUE then the platform/bin/curl program will be used
+# If TRUE then the curl program will be used
 # if FALSE then httr::GET() will be used.
 # Note: if running remote-hosted and the remote server is still mis-configured
 # (SSL library mismatch problem) then using httr::GET() will fail and cause
@@ -79,7 +80,8 @@ if (!ASNAT_use_curl_program) {
 # This allows multi-variable/column data to be read in when some columns have
 # missing values.
 # However, functions such as min(), max(), mean(), var(), quantile(), etc.
-# must then include argument na.rm = TRUE to avoid numeric/plot problems.
+# must then include argument na.rm = TRUE and their result checked with
+# is.finite() to avoid numeric/plot problems.
 
 ASNAT_na_strings <-
   c("", "''", "NA", "NaN", "nan", "-9999", "-9999.0", "-Inf", "Inf")
@@ -196,6 +198,520 @@ ASNAT_fancy_label <- function(label) {
     result <- gsub(fixed = TRUE, "pm1", pm1_subscripted, result)
   }
 
+  return(result)
+}
+
+
+
+# Load data frames: USCensusStates, USCensusCounties, USIndianLands. EXPENSIVE.
+# NOTE: Per email on 2025-07-01 from jonathan.s.callahan@gmail.com
+# MazamaSpatialUtils version 0.8 does not contain USIndianLands (not a priority)
+# and the structure of these spatial datasets is different from the previous
+# version 0.7.
+
+if (!exists("USCensusStates") || !exists("USCensusCounties")) {
+
+  if (!dir.exists("data/tmp")) {
+    dir.create("data/tmp", recursive = TRUE, showWarnings = FALSE)
+  }
+
+  MazamaSpatialUtils::setSpatialDataDir("data/tmp")
+
+  if (!file.exists("data/tmp/USCensusStates.rda")) {
+    MazamaSpatialUtils::installSpatialData("USCensusStates")
+  }
+
+  if (!file.exists("data/tmp/USCensusCounties.rda")) {
+    MazamaSpatialUtils::installSpatialData("USCensusCounties")
+  }
+
+#  if (!file.exists("data/tmp/USIndianLands.rda")) {
+#    MazamaSpatialUtils::installSpatialData("USIndianLands")
+#  }
+
+  MazamaSpatialUtils::loadSpatialData("USCensusStates")
+  MazamaSpatialUtils::loadSpatialData("USCensusCounties")
+  #MazamaSpatialUtils::loadSpatialData("USIndianLands")
+}
+
+
+
+# Get a vector of indices into spatial_dataset of shapes whose bounding
+# rectangle (of at least one of its rings) intersects given bounds.
+
+ASNAT_indices_of_shapes_intersecting_bounds <-
+function(west, south, east, north, spatial_dataset) {
+  ASNAT_dprint("ASNAT_indices_of_shapes_intersecting_bounds():")
+  timer <- ASNAT_start_timer()
+  stopifnot(west >= -180.0)
+  stopifnot(east >= west)
+  stopifnot(east <= 180.0)
+  stopifnot(south >= -90.0)
+  stopifnot(north >= south)
+  stopifnot(north <= 90.0)
+  stopifnot("sf" %in% class(spatial_dataset))
+
+  shape_count <- nrow(spatial_dataset)
+  result <- rep(FALSE, shape_count)
+
+  # Compute the length of the longest ring:
+
+  longest_ring_length <- 0L
+
+  for (shape_index in seq_along(spatial_dataset$geometry)) {
+
+    for (rings in spatial_dataset$geometry[[shape_index]]) {
+
+      for (ring in rings) {
+        longitudes <- ring[, 1L]
+        ring_length <- length(longitudes)
+
+        if (ring_length > longest_ring_length) {
+          longest_ring_length <- ring_length
+        }
+      }
+    }
+  }
+
+  # Allocate vectors for clipped ring coordinates:
+
+  longest_possible_clipped_ring_length <- 2L * longest_ring_length + 2L
+  clipped_longitudes <- rep(0.0, longest_possible_clipped_ring_length)
+  clipped_latitudes <- rep(0.0, longest_possible_clipped_ring_length)
+
+  for (shape_index in seq_along(spatial_dataset$geometry)) {
+    this_shape_intersects <- FALSE
+
+    for (rings in spatial_dataset$geometry[[shape_index]]) {
+
+      for (ring in rings) {
+
+        # Test if all ring coordinate are beyond a bounds edge:
+
+        longitudes <- ring[, 1L]
+        longitude_range <- range(longitudes)
+        ring_west <- longitude_range[[1L]]
+
+        if (ring_west > east) { # The ring is entirely east of bounds so skip.
+          next
+        }
+
+        ring_east <- longitude_range[[2L]]
+
+        if (ring_east < west) { # The ring is entirely west of bounds so skip.
+          next
+        }
+
+        latitudes <- ring[, 2L]
+        latitude_range <- range(latitudes)
+        ring_south <- latitude_range[[1L]]
+
+        if (ring_south > north) { # The ring is entirely north of bounds so skip
+          next
+        }
+
+        ring_north <- latitude_range[[2L]]
+
+        if (ring_north < south) { # The ring is entirely south of bounds so skip
+          next
+        }
+
+        # Test if the ring is entirely within bounds:
+
+        if (ring_west >= west && ring_east <= east &&
+            ring_south >= south && ring_north <= north) {
+          this_shape_intersects <- TRUE
+          break
+        }
+
+        # Finally, compute polygon ring clipped to view bounds (EXPENSIVE):
+
+        if (length(longitudes) >= 3L) {
+          clipped_vertex_count <- 0L
+
+          if (ASNAT_use_cpp_functions) {
+            clipped_vertex_count <-
+              ASNAT_clip_polygon_cpp(west, south, east, north,
+                                     longitudes, latitudes,
+                                     clipped_longitudes, clipped_latitudes)
+          } else {
+            clipped_vertex_count <-
+              ASNAT_clip_polygon(west, south, east, north,
+                                 longitudes, latitudes,
+                                 clipped_longitudes, clipped_latitudes)
+          }
+
+          if (clipped_vertex_count >= 3L) {
+            this_shape_intersects <- TRUE
+            break
+          }
+        }
+      }
+    }
+
+    if (this_shape_intersects) {
+      result[[shape_index]] <- TRUE
+      next
+    }
+  }
+
+  ASNAT_elapsed_timer("ASNAT_indices_of_shapes_intersecting_bounds:", timer)
+  return(result)
+}
+
+
+
+# Clip the polygon longitudes and latitudes to the bounds.
+# Returns number of clipped vertices stored in cx, cy.
+# Uses the Liang-Barsky polygon clipping algorithm. (Fastest known.)
+# "An Analysis and Algorithm for Polygon Clipping",
+# You-Dong Liang and Brian Barsky, UC Berkeley,
+# CACM Vol 26 No. 11, November 1983.
+# https://www.longsteve.com/fixmybugs/?page_id=210
+
+ASNAT_clip_polygon <-
+function(clipXMin, clipYMin, clipXMax, clipYMax, x, y, cx, cy) {
+  stopifnot(is.numeric(clipXMin))
+  stopifnot(is.numeric(clipYMin))
+  stopifnot(is.numeric(clipXMax))
+  stopifnot(is.numeric(clipYMax))
+  stopifnot(clipXMin < clipXMax)
+  stopifnot(clipYMin < clipYMax)
+  stopifnot(is.numeric(x))
+  stopifnot(length(x) >= 3L)
+  stopifnot(is.numeric(y))
+  stopifnot(length(y) == length(x))
+  stopifnot(is.numeric(cx))
+  stopifnot(length(cx) >= 2L * length(x) + 2L)
+  stopifnot(is.numeric(cy))
+  stopifnot(length(cy) == length(cx))
+
+  result <- 0L
+  xIn <- 0.0 # X-coordinate of entry point.
+  yIn <- 0.0 # Y-coordinate of entry point.
+  xOut <- 0.0 # X-coordinate of exit point.
+  yOut <- 0.0 # Y-coordinate of exit point.
+  tInX <- 0.0 # Parameterized X-coordinate of entry intersection.
+  tInY <- 0.0 # Parameterized Y-coordinate of entry intersection.
+  tOutX <- 0.0 # Parameterized X-coordinate of exit intersection.
+  tOutY <- 0.0 # Parameterized Y-coordinate of exit intersection.
+  count <- length(x)
+
+  for (vertex in seq_along(x)) {
+    vertexp1 <- vertex + 1L
+    vertex1 <- if (vertexp1 <= count) vertexp1 else 1L
+    vx <- x[[vertex]]
+    vy <- y[[vertex]]
+    deltaX <- x[[vertex1]] - vx # Edge direction.
+    deltaY <- y[[vertex1]] - vy
+    oneOverDeltaX <- if (deltaX != 0.0) 1.0 / deltaX else 0.0
+    oneOverDeltaY <- if (deltaY != 0.0) 1.0 / deltaY else 0.0
+    tOut1 <- 0.0
+    tOut2 <- 0.0
+    tIn2 <- 0.0
+
+    # Determine which bounding lines for the clip window the containing line
+    # hits first:
+
+    if (deltaX > 0.0 || (deltaX == 0.0 && vx > clipXMax)) {
+      xIn <- clipXMin
+      xOut <- clipXMax
+    } else {
+      xIn <- clipXMax
+      xOut <- clipXMin
+    }
+
+    if (deltaY > 0.0 || (deltaY == 0.0 && vy > clipYMax)) {
+      yIn <- clipYMin
+      yOut <- clipYMax
+    } else {
+      yIn <- clipYMax
+      yOut <- clipYMin
+    }
+
+    # Find the t values for the x and y exit points:
+
+    if (deltaX != 0.0) {
+      tOutX <- (xOut - vx) * oneOverDeltaX
+    } else if (vx <= clipXMax && clipXMin <= vx) {
+      tOutX <- Inf
+    } else {
+      tOutX <- -Inf
+    }
+
+    if (deltaY != 0.0) {
+      tOutY <- (yOut - vy) * oneOverDeltaY
+    } else if (vy <= clipYMax && clipYMin <= vy) {
+      tOutY <- Inf
+    } else {
+      tOutY <- -Inf
+    }
+
+    # Set tOut1 = min(tOutX, tOutY) and tOut2 = max(tOutX, tOutY):
+
+    if (tOutX < tOutY) {
+      tOut1 <- tOutX
+      tOut2 <- tOutY
+    } else {
+      tOut1 <- tOutY
+      tOut2 <- tOutX
+    }
+
+    if (tOut2 > 0.0) {
+
+      if (deltaX != 0.0) {
+        tInX <- (xIn - vx) * oneOverDeltaX
+      } else {
+        tInX <- -Inf
+      }
+
+      if (deltaY != 0.0) {
+        tInY <- (yIn - vy) * oneOverDeltaY
+      } else {
+        tInY <- -Inf
+      }
+
+      # Set tIn2 = max(tInX, tInY):
+
+      if (tInX < tInY) {
+        tIn2 <- tInY
+      } else {
+        tIn2 <- tInX
+      }
+
+      if (tOut1 < tIn2) { # No visible segment.
+
+        if (0.0 < tOut1 && tOut1 <= 1.0) { # Line crosses intermediate corner.
+          result <- result + 1L
+
+          if (tInX < tInY) {
+            cx[[result]] <- xOut
+            cy[[result]] <- yIn
+          } else {
+            cx[[result]] <- xIn
+            cy[[result]] <- yOut
+          }
+        }
+      } else { # Line crosses through window:
+
+        if (0.0 < tOut1 && tIn2 <= 1.0) {
+
+          if (0.0 <= tIn2) { # Visible segment:
+            result <- result + 1L
+
+            if (tInX > tInY) {
+              cx[[result]] <- xIn
+              cy[[result]] <- vy + (tInX * deltaY)
+            } else {
+              cx[[result]] <- vx + (tInY * deltaX)
+              cy[[result]] <- yIn
+            }
+          }
+
+          if (1.0 >= tOut1) {
+            result <- result + 1L
+
+            if (tOutX < tOutY) {
+              cx[[result]] <- xOut
+              cy[[result]] <- vy + (tOutX * deltaY)
+            } else {
+              cx[[result]] <- vx + (tOutY * deltaX)
+              cy[[result]] <- yOut
+            }
+
+          } else {
+            result <- result + 1L
+            cx[[result]] <- x[[vertex1]]
+            cy[[result]] <- y[[vertex1]]
+          }
+        }
+      }
+
+      if (0.0 < tOut2 && tOut2 <= 1.0) {
+        result <- result + 1L
+        cx[[result]] <- xOut
+        cy[[result]] <- yOut
+      }
+    }
+  }
+
+
+  if (result < 3L) {
+    result <- 0L # Discard any result less than a triangle.
+  } else { # Check that the clipped polygon(s) are not entirely degenerate:
+    clipped_polygon_area <- ASNAT_signed_area_of_polygon(result, cx, cy)
+
+    if (clipped_polygon_area == 0.0) {
+      result <- 0L
+    }
+  }
+
+  return(result)
+}
+
+
+
+# Compute signed area of a (single ring) of a polygon.
+# Result is negative if vertices are in clockwise order.
+# http://mathworld.wolfram.com/PolygonArea.html
+
+ASNAT_signed_area_of_polygon <- function(count, x, y) {
+  stopifnot(is.numeric(count))
+  stopifnot(as.integer(count) >= 3L)
+  stopifnot(is.numeric(x))
+  stopifnot(length(x) >= count)
+  stopifnot(is.numeric(y))
+  stopifnot(length(y) == length(x))
+
+  count <- as.integer(count)
+  result <- 0.0
+
+  for (index in 1L:count) {
+    indexp1 <- index + 1L
+    index1 <- if (indexp1 <= count) indexp1 else 1L
+    triangle_area <-
+      x[[index]] * y[[index1]] - x[[index1]] * y[[index]]
+    result <- result + triangle_area
+  }
+
+  result <- result * 0.5
+  return(result)
+}
+
+
+
+# Get vector of spatial place names for type near given view bounds:
+
+ASNAT_spatial_names <- function(spatial_filter_type,
+                                west, south, east, north) {
+  stopifnot(nchar(spatial_filter_type) > 0L)
+  stopifnot(spatial_filter_type == "none" ||
+            spatial_filter_type == "state" ||
+            spatial_filter_type == "county" ||
+            spatial_filter_type == "tribe")
+  stopifnot(west >= -180.0)
+  stopifnot(east >= west)
+  stopifnot(east <= 180.0)
+  stopifnot(south >= -90.0)
+  stopifnot(north >= south)
+  stopifnot(north <= 90.0)
+
+  result <- ""
+
+  if (spatial_filter_type == "state") {
+    indices <-
+      ASNAT_indices_of_shapes_intersecting_bounds(west, south, east, north,
+                                                  USCensusStates_01)
+    result <- sort(paste(USCensusStates_01$stateCode[indices],
+                         USCensusStates_01$stateName[indices]))
+  } else if (spatial_filter_type == "county") {
+    indices <-
+      ASNAT_indices_of_shapes_intersecting_bounds(west, south, east, north,
+                                                  USCensusCounties_01)
+    result <- sort(paste(USCensusCounties_01$stateCode[indices],
+                         USCensusCounties_01$countyName[indices]))
+#  } else if (spatial_filter_type == "tribe") {
+#    indices <-
+#      ASNAT_indices_of_shapes_intersecting_bounds(west, south, east, north,
+#                                                  USIndianLands_01)
+#    result <- sort(USIndianLands_01$GNISName[indices])
+  }
+
+  return(result)
+}
+
+
+
+# Get data frame filtered by selected spatial place names.
+
+ASNAT_spatially_filter_data_frame <-
+function(spatial_filter_type, place_names, data_frame) {
+  timer <- ASNAT_start_timer()
+  stopifnot(class(spatial_filter_type) == "character")
+  stopifnot(length(spatial_filter_type) == 1L)
+  stopifnot(nchar(spatial_filter_type) > 0L)
+  stopifnot(spatial_filter_type == "state" ||
+            spatial_filter_type == "county" ||
+            spatial_filter_type == "tribe")
+  stopifnot(class(place_names) == "character")
+  stopifnot(length(place_names) > 0L)
+  stopifnot(class(data_frame) == "data.frame")
+  stopifnot(nrow(data_frame) >= 0L)
+  stopifnot(ncol(data_frame) >= 3L)
+  stopifnot(colnames(data_frame)[[2L]] == "longitude(deg)")
+  stopifnot(colnames(data_frame)[[3L]] == "latitude(deg)")
+  stopifnot(ASNAT_site_column_index(colnames(data_frame)) > 3L)
+
+  result <- NULL
+
+  # Sites are stationary so just get unique site locations to check:
+
+  column_names <- colnames(data_frame)
+  id_column <- ASNAT_site_column_index(column_names)
+  sites <- data_frame[[id_column]]
+  unique_sites <- unique(sort.int(sites))
+  unique_count <- length(unique_sites)
+  longitudes <- rep(0.0, unique_count)
+  latitudes <- rep(0.0, unique_count)
+  site_sorted_data_frame <-
+    data_frame[order(data_frame[, id_column], decreasing = FALSE), ]
+  previous_site <- 0L
+  unique_index <- 0L
+
+  for (row in seq_along(sites)) {
+    site <- site_sorted_data_frame[row, id_column]
+
+    if (site != previous_site) {
+      previous_site <- site
+      longitude <- site_sorted_data_frame[row, 2L]
+      latitude <- site_sorted_data_frame[row, 3L]
+      unique_index <- unique_index + 1L
+      stopifnot(unique_index <= unique_count)
+      longitudes[[unique_index]] <- longitude
+      latitudes[[unique_index]] <- latitude
+    }
+  }
+
+  stopifnot(unique_index == unique_count)
+
+  spatial_dataset_name <-
+    switch(spatial_filter_type,
+           "state" = "USCensusStates",
+           "county" = "USCensusCounties",
+           "tribe" = "USIndianLands")
+
+  # Computing which points are in a set of polygons is EXPENSIVE:
+
+  mapped_data_frame <-
+    MazamaSpatialUtils::getVariable(longitudes, latitudes, allData = TRUE,
+                                    dataset = spatial_dataset_name)
+
+  if (nrow(mapped_data_frame) > 0L) {
+    names <- NULL
+
+    if (spatial_filter_type == "state") {
+      names <- paste(mapped_data_frame$stateCode, mapped_data_frame$stateName)
+    } else if (spatial_filter_type == "county") {
+      names <- paste(mapped_data_frame$stateCode, mapped_data_frame$countyName)
+#   } else if (spatial_filter_type == "tribe") {
+#     names <- mapped_data_frame$GNISName
+    }
+
+    unique_matched_rows <- names %in% place_names
+
+    if (length(unique_matched_rows) > 0L &&
+        !all(unique_matched_rows == FALSE)) {
+      matched_sites <- unique_sites[unique_matched_rows]
+      matched_rows <- sites %in% matched_sites
+
+      if (length(matched_rows) > 0L &&
+          !all(matched_rows == FALSE)) {
+        result <- data_frame[matched_rows, ]
+      }
+    }
+  }
+
+  ASNAT_elapsed_timer("ASNAT_spatially_filter_data_frame:", timer)
   return(result)
 }
 
@@ -925,13 +1441,8 @@ ASNAT_http_get_curl <-
     command <-
       paste0(current_directory, "/Windows/bin/curl.exe ", args,
              double_quote, url, double_quote)
-  } else if (startsWith(platform, "Darwin") && file.exists("/usr/bin/curl")) {
-    # New MacOS disallows running curl from other directories!
-    command <- paste0("/usr/bin/curl ", args, single_quote, url, single_quote)
   } else {
-    command <-
-      paste0(current_directory, "/", platform, "/bin/curl ", args,
-             single_quote, url, single_quote)
+    command <- paste0("/usr/bin/curl ", args, single_quote, url, single_quote)
   }
 
   ASNAT_dprint("%s\n", command)
@@ -1186,6 +1697,7 @@ ASNAT_filter_text_file <- function(file_name) {
 
 ASNAT_site_column_index <- function(column_names) {
   stopifnot(!is.null(column_names))
+  stopifnot(class(column_names) == "character")
   stopifnot(length(column_names) > 0L)
   possible_site_column_names <-
     c("station(-)", "site(-)", "id(-)", "site_id(-)")
@@ -2848,7 +3360,6 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
       reported_count <- length(timestamps)
       timestamp_first <- timestamps[[1L]]
       timestamp_last <- timestamps[[reported_count]]
-      missing_percent <- (1.0 - reported_count / timesteps) * 100.0
       measures <- site_data_frame[[measure_column]]
       missing_percent <- 100.0
       minimum <- ASNAT_output_missing_value
@@ -2864,7 +3375,7 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
         maximum <- max(measures, na.rm = TRUE)
         mean_value <- mean(measures, na.rm = TRUE)
         percentiles <-
-          stats::quantile(measures, na.rm = TRUE, probs = c(.25, .5, .75),
+          stats::quantile(measures, na.rm = TRUE, probs = c(0.25, 0.5, 0.75),
                           type = 5L)
         p25 <- percentiles[[1L]]
         median_value <- percentiles[[2L]]
@@ -2992,13 +3503,18 @@ function(data_frame_x, data_frame_y, delta_meters, is_hourly) {
 
 
 
-# Validate data frame read from a webservice or file valid and return it
+# Validate data frame read from a webservice or file and return it
 # (with possible edits).
 # If not valid then print a failure message to the console and return NULL.
 # Validated input data frames match:
 # timestamp(UTC)	longitude(deg)	latitude(deg)	id(-)	...	note(-)
 
-ASNAT_validate_input_data_frame <- function(data_frame) {
+ASNAT_validate_input_data_frame <- function(data_frame, aggregate) {
+  stopifnot(class(aggregate) == "character")
+  stopifnot(length(aggregate) == 1L)
+  stopifnot(aggregate == "hourly" || aggregate == "daily" ||
+            aggregate == "none")
+
   failure <- NULL
 
   if (class(data_frame) != "data.frame") {
@@ -3196,43 +3712,32 @@ ASNAT_validate_input_data_frame <- function(data_frame) {
                   failure <-
                     paste0("timestamps must be valid YYYY-MM-DDTHH:MM:SS-0000",
                            " and in increasing order.\n")
-                } else {
+                } else if (aggregate != "none") {
 
-                  # Check that each site has at most one row per hour:
+                  # Check that no site rows have the same timestamp hour.
+                  # Sort the data frame by site then timestamp:
 
-                  timestamps <- substr(timestamps, 1L, 13L)
-                  first_timestamp <- timestamps[[1L]]
-                  last_timestamp <- timestamps[[length(timestamps)]]
-                  stopifnot(last_timestamp >= first_timestamp)
-                  first_time <-
-                    as.POSIXct(first_timestamp, format = "%Y-%m-%dT%H")
-                  last_time <-
-                    as.POSIXct(last_timestamp, format = "%Y-%m-%dT%H")
-                  timesteps <- 1L +
-                    as.integer(difftime(last_time, first_time, units = "hours"))
-                  stopifnot(timesteps >= 1L)
-                  complete_timestamps <-
-                    format(seq(first_time, last_time, "hours"),
-                               format = "%Y-%m-%dT%H")
+                  site_time_sorted_data_frame <-
+                    data_frame[order(data_frame[, id_column],
+                                     data_frame[, 1L],
+                                     decreasing = FALSE), ]
 
-                  sites <- data_frame[[id_column]]
-                  unique_sites <- unique(sort.int(sites))
+                  previous_timestamp <- ""
+                  previous_site <- 0L
 
-                  for (site in unique_sites) {
+                  for (row in seq_along(timestamps)) {
+                    site <- site_time_sorted_data_frame[row, id_column]
+                    timestamp <- site_time_sorted_data_frame[row, 1L]
+                    timestamp <- substr(timestamp, 1L, 13L)
 
-                    for (timestep in 1L:timesteps) {
-                      timestamp <- complete_timestamps[[timestep]]
-                      matched_rows <-
-                        which(sites == site & timestamps == timestamp)
-
-                      if (length(matched_rows) > 1L) {
-                        failure <- "Sites must have at most one row per hour.\n"
-                        ok <- FALSE
-                        break
-                      }
-                    }
-
-                    if (!ok) {
+                    if (site != previous_site) {
+                      previous_site <- site
+                      previous_timestamp <- timestamp
+                    } else if (timestamp != previous_timestamp) {
+                      previous_timestamp <- timestamp
+                    } else {
+                      failure <- "Sites must have at most one row per hour.\n"
+                      ok <- FALSE
                       break
                     }
                   }
@@ -3248,6 +3753,17 @@ ASNAT_validate_input_data_frame <- function(data_frame) {
   result <- NULL
 
   if (is.null(failure)) {
+
+    # Zero-out parts of timestamp less than aggregate yyyy-mm-ddThh:00:00-0000:
+
+    if (aggregate == "hourly") {
+      data_frame[1L] <-
+        paste0(substr(data_frame[[1L]], 1L, 13L), ":00:00-0000")
+    } else if (aggregate == "daily") {
+      data_frame[1L] <-
+        paste0(substr(data_frame[[1L]], 1L, 10L), "T00:00:00-0000")
+    }
+
     result <- data_frame
   } else {
     failure <- paste0("Invalid input data. Problem: ", failure)
@@ -3306,7 +3822,7 @@ ASNAT_read_standard_file <- function(file_name) {
                          na.strings = ASNAT_na_strings,
                          stringsAsFactors = FALSE))
 
-        result <- ASNAT_validate_input_data_frame(result)
+        result <- ASNAT_validate_input_data_frame(result, "hourly")
       }
     }
   } else {
@@ -3795,7 +4311,7 @@ function(file_list_data_frame, longitude, latitude) {
 
     # Validate final result. If invalid then result will be NULL:
 
-    result <- ASNAT_validate_input_data_frame(result)
+    result <- ASNAT_validate_input_data_frame(result, "none")
   } # end if result is not null.
 
   ASNAT_elapsed_timer("ASNAT_import_purple_air:", timer)

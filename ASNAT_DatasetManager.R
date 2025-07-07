@@ -15,7 +15,7 @@
 # Load required source files:
 ###############################################################################
 
-source("ASNAT_Utilities.R") # For function ASNAT_declare_method().
+#source("ASNAT_Utilities.R") # For function ASNAT_declare_method().
 source("ASNAT_Dataset.R")   # For class ASNAT_Dataset.
 
 ###############################################################################
@@ -398,6 +398,8 @@ function(object,
   stopifnot(class(end_date) == "Date")
   stopifnot(start_date <= end_date)
 
+  stopifnot(class(aggregate) == "character")
+  stopifnot(length(aggregate) == 1L)
   stopifnot(aggregate == "hourly" || aggregate == "daily")
 
   stopifnot(west_bound >= -180.0)
@@ -631,7 +633,7 @@ function(object,
 
           # Validate the final data_frame before storing it:
 
-          data_frame <- ASNAT_validate_input_data_frame(data_frame)
+          data_frame <- ASNAT_validate_input_data_frame(data_frame, aggregate)
 
           if (!is.null(data_frame)) {
 
@@ -694,35 +696,34 @@ function(object,
 # Example:
 # data_frame <-
 #   retrieve_purple_air_sites(dataset_manager,
-#                             as.Date("2022-07-01")
+#                             "2022-07-01", "2022-07-31",
 #                             "my-valid-purple-air-api-read-key")
 
 ASNAT_declare_method("ASNAT_DatasetManager", "retrieve_purple_air_sites",
-function(object, start_date, key) {
+function(object, start_date, end_date, key) {
   ASNAT_dprint("In retrieve_purple_air_sites()\n")
   ASNAT_check(methods::validObject(object))
-  stopifnot(class(start_date) == "Date")
+  stopifnot(class(start_date) == "character")
+  stopifnot(length(start_date) == 1L)
+  stopifnot(nchar(start_date) == 10L)
+  stopifnot(class(end_date) == "character")
+  stopifnot(length(end_date) == 1L)
+  stopifnot(nchar(end_date) == 10L)
+  stopifnot(start_date <= end_date)
   stopifnot(class(key) == "character")
+  stopifnot(length(key) == 1L)
 
   result <- data.frame()
 
   if (ASNAT_is_conforming_purple_air_key(key)) {
     the_date <- start_date
-    yesterday <- Sys.Date() - 1L
-
-    if (the_date >= yesterday) {
-      the_date <- yesterday - 1L
-    }
-
-    yyyy_mm_dd <- format(the_date, "%Y-%m-%d")
-    time_option <- paste0(yyyy_mm_dd, "T00:00:00Z")
+    time_option <- paste0(start_date, "T00:00:00Z/", end_date, "T23:59:59Z")
 
     url <- paste0(object@rsigserver_url,
                   "SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage",
                   "&FORMAT=ascii",
-                  "&COVERAGE=PurpleAir.sites",
+                  "&COVERAGE=PurpleAir.locations",
                   "&BBOX=-180,-90,180,90",
-                  "&OUT_IN_FLAG=0",
                   "&KEY=",
                   key,
                   "&TIME=",
@@ -734,7 +735,8 @@ function(object, start_date, key) {
     if (ok) {
 
       # File is tab-delimited and the first line is a header that looks like:
-      # longitude(deg)	latitude(deg)	id(-)	note(-)
+      # Timestamp(UTC)	Longitude(deg)	Latitude(deg)	Elevation(m)	yearly_id(-)	Notes(-)
+      # 2024-09-01T00:00:00-0000	-121.33145	  44.13364	 985.11360	276622.00000	Cascades Academy
 
       result <-
         try(silent = TRUE,
@@ -743,7 +745,26 @@ function(object, start_date, key) {
       unlink(file_name)
       ok <- class(result) == "data.frame" && nrow(result) > 0L
 
-      if (!ok) {
+      if (ok) {
+
+        # Only keep columns longitude, latitude, id, note:
+
+        result <- result[, c(2L, 3L, 5L, 6L)]
+
+        # Convert id column to integer:
+
+        result[3L] <- trunc(result[3L])
+
+        # Rename columns:
+
+        colnames(result) <-
+          c("longitude(deg)",	"latitude(deg)",	"id(-)",	"note(-)")
+
+        # Sort by id:
+
+        result <- result[order(result[, 3L], decreasing = FALSE), ]
+
+      } else {
         result <- data.frame()
       }
     }
@@ -855,6 +876,51 @@ function(object, dataset_index, dataset) {
   stopifnot(dataset_index <= count(object))
   stopifnot(class(dataset) == "ASNAT_Dataset")
   object@datasets[[dataset_index]] <- dataset
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
+# Spatially filter all loaded datasets by place names:
+
+ASNAT_declare_method("ASNAT_DatasetManager", "spatially_filter_datasets",
+function(object, spatial_filter_type, place_names) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(nchar(spatial_filter_type) > 0L)
+  stopifnot(spatial_filter_type == "state" ||
+            spatial_filter_type == "county" ||
+            spatial_filter_type == "tribe")
+  stopifnot(class(place_names) == "character")
+  stopifnot(length(place_names) > 0L)
+
+  dataset_index <- 1L
+
+  while (dataset_index <= length(object@datasets)) {
+    the_dataset <- object@datasets[[dataset_index]]
+    the_data_frame <- data_frame(the_dataset)
+    the_filtered_data_frame <-
+      ASNAT_spatially_filter_data_frame(spatial_filter_type, place_names,
+                                        the_data_frame)
+
+    if (is.null(the_filtered_data_frame)) {
+      object@datasets <- object@datasets[-dataset_index] # Decrements length().
+    } else {
+      the_filtered_dataset <-
+        ASNAT_Dataset(coverage(the_dataset),
+                      start_date(the_dataset),
+                      end_date(the_dataset),
+                      aggregation(the_dataset),
+                      url(the_dataset),
+                      file_name(the_dataset),
+                      note(the_dataset),
+                      the_filtered_data_frame,
+                      variable_column(the_dataset))
+      object@datasets[[dataset_index]] <- the_filtered_dataset
+      dataset_index <- dataset_index + 1L
+    }
+  }
+
   ASNAT_check(methods::validObject(object))
   return(object)
 })

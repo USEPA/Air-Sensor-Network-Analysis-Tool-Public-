@@ -13,7 +13,7 @@
 # Load required source files:
 ###############################################################################
 
-source("ASNAT_Utilities.R")      # For ASNAT_declare_method().
+#source("ASNAT_Utilities.R")      # For ASNAT_declare_method().
 source("ASNAT_DatasetManager.R") # For class ASNAT_DatasetManager.
 
 ###############################################################################
@@ -51,6 +51,7 @@ methods::setClass(
    purple_air_sensor = "integer", # 0 for all sensors or > 0 for a specific one.
    purple_air_sites_data_frame = "data.frame", # PurpleAir sites.
    aqs_pm25_codes = "character", # For optional subset of AirNow/AQS pm25 codes.
+   spatial_filter_type = "character", # For optional subset of data points.
    ok = "logical", # Did last command succeed?
    legend_colormap = "character", # Name of legend colormap to use.
    show_mean_values_on_map = "logical", # Show map points colored by mean?
@@ -150,6 +151,10 @@ methods::setValidity("ASNAT_Model", function(object) {
   stopifnot(ncol(object@purple_air_sites_data_frame) == 0L ||
             (ncol(object@purple_air_sites_data_frame) == 4L &&
              nrow(object@purple_air_sites_data_frame) > 0L))
+  stopifnot(object@spatial_filter_type == "none" ||
+            object@spatial_filter_type == "state" ||
+            object@spatial_filter_type == "county" ||
+            object@spatial_filter_type == "tribe")
   stopifnot(object@ok == FALSE || object@ok == TRUE)
   stopifnot(object@legend_colormap == "default" ||
             object@legend_colormap == "AQI" ||
@@ -304,6 +309,7 @@ function(data_subdirectory = NULL) {
   purple_air_key <- ""
   purple_air_sensor <- 0L
   aqs_pm25_codes <- ASNAT_aqs_pm25_codes[[1L]]
+  spatial_filter_type <- "none"
   legend_colormap <- "default"
   show_mean_values_on_map <- FALSE
   use_fancy_labels <- FALSE
@@ -596,10 +602,22 @@ function(data_subdirectory = NULL) {
           if (ASNAT_is_valid_aqs_pm25_codes(value)) {
             aqs_pm25_codes <- value
           }
+        } else if (tag == "spatial_filter_type") {
+
+          if (value == "none" ||
+              value == "state" ||
+              value == "county" ||
+              value == "tribe") {
+            spatial_filter_type <- value
+          }
         }
       }
     }
   }
+
+  # HACK: Set spatial_filter_type to "none" so launch and map zoom/pan is fast!
+
+  spatial_filter_type <- "none"
 
   timesteps <- days
 
@@ -619,8 +637,13 @@ function(data_subdirectory = NULL) {
   purple_air_sites_data_frame <- data.frame()
 
   if (current_version(dataset_manager) > 0L && nchar(purple_air_key) > 0L) {
+    yyyy_mm_dd1 <- as.character(start_date)
+    yyyy_mm_dd2 <- as.character(start_date + days)
     purple_air_sites_data_frame <-
-      retrieve_purple_air_sites(dataset_manager, start_date, purple_air_key)
+      retrieve_purple_air_sites(dataset_manager,
+                                yyyy_mm_dd1,
+                                yyyy_mm_dd2,
+                                purple_air_key)
   }
 
   object <- new("ASNAT_Model",
@@ -639,6 +662,7 @@ function(data_subdirectory = NULL) {
                 purple_air_sensor = purple_air_sensor,
                 purple_air_sites_data_frame = purple_air_sites_data_frame,
                 aqs_pm25_codes = aqs_pm25_codes,
+                spatial_filter_type = spatial_filter_type,
                 ok = TRUE,
                 legend_colormap = legend_colormap,
                 show_mean_values_on_map = show_mean_values_on_map,
@@ -790,6 +814,9 @@ function(object) object@purple_air_sites_data_frame)
 
 ASNAT_declare_method("ASNAT_Model", "aqs_pm25_codes",
 function(object) object@aqs_pm25_codes)
+
+ASNAT_declare_method("ASNAT_Model", "spatial_filter_type",
+function(object) object@spatial_filter_type)
 
 ASNAT_declare_method("ASNAT_Model", "maximum_neighbor_distance",
 function(object) object@maximum_neighbor_distance)
@@ -1443,9 +1470,12 @@ function(object, value) {
 
   if (ASNAT_is_conforming_purple_air_key(value)) {
     object@purple_air_key <- value
-
+    yyyy_mm_dd1 <- substr(first_timestamp(object), 1L, 10L)
+    yyyy_mm_dd2 <- substr(last_timestamp(object), 1L, 10L)
     object@purple_air_sites_data_frame <-
-      retrieve_purple_air_sites(object@dataset_manager, object@start_date,
+      retrieve_purple_air_sites(object@dataset_manager,
+                                yyyy_mm_dd1,
+                                yyyy_mm_dd2,
                                 object@purple_air_key)
 
     object@ok <- nrow(object@purple_air_sites_data_frame) > 0L
@@ -1482,6 +1512,25 @@ function(object, value) {
   stopifnot(class(value) == "character")
   stopifnot(ASNAT_is_valid_aqs_pm25_codes(value))
   object@aqs_pm25_codes <- value
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
+# Change spatial_filter_type:
+# Example: spatial_filter_type(asnat_model) <<- spatial_filter_type
+
+ASNAT_declare_method("ASNAT_Model", "spatial_filter_type<-",
+function(object, value) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(class(value) == "character")
+  stopifnot(value == "none" ||
+            value == "state" ||
+            value == "county" ||
+            value == "tribe")
+  object@spatial_filter_type <- value
   object@ok <- TRUE
   ASNAT_check(methods::validObject(object))
   return(object)
@@ -2161,6 +2210,25 @@ function(object, dataset_index, dataset) {
   ASNAT_check(methods::validObject(object))
   return(object)
 })
+
+
+
+# Spatially filter all loaded datasets:
+
+ASNAT_declare_method("ASNAT_Model", "spatially_filter_datasets",
+function(object, place_names) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(class(place_names) == "character")
+  stopifnot(length(place_names) > 0L)
+  object@dataset_manager <-
+    spatially_filter_datasets(object@dataset_manager,
+                              object@spatial_filter_type,
+                              place_names)
+  object@ok <- ok(object@dataset_manager)
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
 
 
 
@@ -3632,6 +3700,7 @@ function(object) {
         "purple_air_key ", object@purple_air_key, "\n",
         "purple_air_sensor ", object@purple_air_sensor, "\n",
         "aqs_pm25_codes ", object@aqs_pm25_codes, "\n",
+        "spatial_filter_type ", object@spatial_filter_type, "\n",
         "legend_colormap ", object@legend_colormap, "\n",
         "show_mean_values_on_map ", object@show_mean_values_on_map, "\n",
         "use_fancy_labels ", object@use_fancy_labels, "\n",

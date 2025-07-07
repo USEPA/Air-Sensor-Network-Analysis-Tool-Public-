@@ -9,6 +9,7 @@ STATUS:  unreviewed tested
 //================================ INCLUDES ===================================
 
 #include <math.h>   // For sqrt(), cos(), floor().
+#include <float.h>  // For DBL_MAX.
 #include <string.h> // For strncmp().
 #include <stdlib.h> // For atoi().
 #include <limits.h> // For INT_MAX.
@@ -265,7 +266,246 @@ static void ASNAT_compare_datasets_cpp0(const double delta_meters,
 
 
 
+/******************************************************************************
+PURPOSE: ASNAT_signed_area_of_polygon_cpp - Signed area of a single contour of
+         a polygon.
+INPUTS:  const size_t count  Number of vertices in polygon.
+         const double x[]    X-coordinates of vertices.
+         const double y[]    Y-coordinates of vertices.
+RETURNS: double signed area of polygon.
+         Negative if vertices are in clockwise order.
+NOTES:   http://mathworld.wolfram.com/PolygonArea.html
+******************************************************************************/
+
+static double ASNAT_signed_area_of_polygon_cpp( const size_t count,
+                                                const double x[],
+                                                const double y[] ) {
+  double result = 0.0;
+  size_t index = 0;
+
+  for ( index = 0; index < count; ++index ) {
+    const size_t indexp1 = index + 1;
+    const size_t index1 = indexp1 < count ? indexp1 : 0;
+    const double triangleArea =
+      x[ index ] * y[ index1 ] - x[ index1 ] * y[ index ];
+    result += triangleArea;
+  }
+
+  result *= 0.5;
+  return result;
+}
+
+
+
 //============================ PUBLIC FUNCTIONS ===============================
+
+
+
+/******************************************************************************
+PURPOSE: ASNAT_clip_polygon_cpp - Clip polygon to an axis-aligned rectangle
+         and return the number of vertices in clipped polygon.
+INPUTS:  const double clipXMin  X-coordinate of lower-left  corner of clip rect
+         const double clipYMin  Y-coordinate of lower-left  corner of clip rect
+         const double clipXMax  X-coordinate of upper-right corner of clip rect
+         const double clipYMax  Y-coordinate of upper-right corner of clip rect
+         const Rcpp::NumericVector& xr X-coordinates of input polygon to clip.
+         const Rcpp::NumericVector& yr X-coordinates of input polygon to clip.
+         Rcpp::NumericVector& cx[2 * count + 2] Clipped X-coordinates storage.
+         Rcpp::NumericVector& cy[2 * count + 2] Clipped Y-coordinates storage.
+OUTPUTS: Rcpp::NumericVector& cx[result]      Clipped X-coordinates.
+         Rcpp::NumericVector& cy[result]      Clipped Y-coordinates.
+RETURNS: int number of vertices in clipped polygon.
+NOTES:   Uses the Liang-Barsky polygon clipping algorithm. (Fastest known.)
+         "An Analysis and Algorithm for Polygon Clipping",
+         You-Dong Liang and Brian Barsky, UC Berkeley,
+         CACM Vol 26 No. 11, November 1983.
+         https://www.longsteve.com/fixmybugs/?page_id=210
+         The export comment below is required!
+******************************************************************************/
+
+// [[Rcpp::export]]
+int ASNAT_clip_polygon_cpp( const double clipXMin,
+                            const double clipYMin,
+                            const double clipXMax,
+                            const double clipYMax,
+                            const Rcpp::NumericVector& xr,
+                            const Rcpp::NumericVector& yr,
+                            Rcpp::NumericVector& cxr,
+                            Rcpp::NumericVector& cyr ) {
+  int result = 0;
+  const int count = xr.length();
+  const double* const x = xr.begin();
+  const double* const y = yr.begin();
+  double* const cx = cxr.begin();
+  double* const cy = cyr.begin();
+  const double inf = DBL_MAX;
+  double xIn   = 0.0; /* X-coordinate of entry point. */
+  double yIn   = 0.0; /* Y-coordinate of entry point. */
+  double xOut  = 0.0; /* X-coordinate of exit point. */
+  double yOut  = 0.0; /* Y-coordinate of exit point. */
+  double tInX  = 0.0; /* Parameterized X-coordinate of entry intersection. */
+  double tInY  = 0.0; /* Parameterized Y-coordinate of entry intersection. */
+  double tOutX = 0.0; /* Parameterized X-coordinate of exit intersection. */
+  double tOutY = 0.0; /* Parameterized Y-coordinate of exit intersection. */
+  int vertex = 0;
+
+  for ( vertex = 0; vertex < count; ++vertex ) {
+    const int vertexp1 = vertex + 1;
+    const int vertex1 = vertexp1 < count ? vertexp1 : 0;
+    const double vx = x[ vertex ];
+    const double vy = y[ vertex ];
+    const double deltaX = x[ vertex1 ] - vx; /* Edge direction. */
+    const double deltaY = y[ vertex1 ] - vy;
+    const double oneOverDeltaX = deltaX ? 1.0 / deltaX : 0.0;
+    const double oneOverDeltaY = deltaY ? 1.0 / deltaY : 0.0;
+    double tOut1 = 0.0;
+    double tOut2 = 0.0;
+    double tIn2 = 0.0;
+
+    /*
+     * Determine which bounding lines for the clip window the containing line
+     * hits first:
+     */
+
+    if ( deltaX > 0.0 || ( deltaX == 0.0 && vx > clipXMax ) ) {
+      xIn  = clipXMin;
+      xOut = clipXMax;
+    } else {
+      xIn  = clipXMax;
+      xOut = clipXMin;
+    }
+
+    if ( deltaY > 0.0 || ( deltaY == 0.0 && vy > clipYMax ) ) {
+      yIn  = clipYMin;
+      yOut = clipYMax;
+    } else {
+      yIn  = clipYMax;
+      yOut = clipYMin;
+    }
+
+    /* Find the t values for the x and y exit points: */
+
+    if ( deltaX != 0.0 ) {
+      tOutX = ( xOut - vx ) * oneOverDeltaX;
+    } else if ( vx <= clipXMax && clipXMin <= vx ) {
+      tOutX = inf;
+    } else {
+      tOutX = -inf;
+    }
+
+    if ( deltaY != 0.0 ) {
+      tOutY = ( yOut - vy ) * oneOverDeltaY;
+    } else if ( vy <= clipYMax && clipYMin <= vy ) {
+      tOutY = inf;
+    } else {
+      tOutY = -inf;
+    }
+
+    /* Set tOut1 = min( tOutX, tOutY ) and tOut2 = max( tOutX, tOutY ): */
+
+    if ( tOutX < tOutY ) {
+      tOut1 = tOutX;
+      tOut2 = tOutY;
+    } else {
+      tOut1 = tOutY;
+      tOut2 = tOutX;
+    }
+
+    if ( tOut2 > 0.0 ) {
+
+      if ( deltaX != 0.0 ) {
+        tInX = ( xIn - vx ) * oneOverDeltaX;
+      } else {
+        tInX = -inf;
+      }
+
+      if ( deltaY != 0.0 ) {
+        tInY = ( yIn - vy ) * oneOverDeltaY;
+      } else {
+        tInY = -inf;
+      }
+
+      /* Set tIn2 = max( tInX, tInY ): */
+
+      if ( tInX < tInY ) {
+        tIn2 = tInY;
+      } else {
+        tIn2 = tInX;
+      }
+
+      if ( tOut1 < tIn2 ) { /* No visible segment. */
+
+        if ( 0.0 < tOut1 && tOut1 <= 1.0 ) {
+
+          /* Line crosses over intermediate corner region. */
+
+          if ( tInX < tInY ) {
+            cx[ result ] = xOut;
+            cy[ result ] = yIn;
+          } else {
+            cx[ result ] = xIn;
+            cy[ result ] = yOut;
+          }
+
+          ++result;
+        }
+      } else { /* Line crosses through window: */
+
+        if ( 0.0 < tOut1 && tIn2 <= 1.0 ) {
+
+          if ( 0.0 <= tIn2 ) { /* Visible segment: */
+
+            if ( tInX > tInY ) {
+              cx[ result ] = xIn;
+              cy[ result ] = vy + ( tInX * deltaY );
+            } else {
+              cx[ result ] = vx + ( tInY * deltaX );
+              cy[ result ] = yIn;
+            }
+
+            ++result;
+          }
+
+          if ( 1.0 >= tOut1 ) {
+
+            if ( tOutX < tOutY ) {
+              cx[ result ] = xOut;
+              cy[ result ] = vy + ( tOutX * deltaY );
+            } else {
+              cx[ result ] = vx + ( tOutY * deltaX );
+              cy[ result ] = yOut;
+            }
+
+            ++result;
+          } else {
+            cx[ result ] = x[ vertex1 ];
+            cy[ result ] = y[ vertex1 ];
+            ++result;
+          }
+        }
+      }
+
+      if ( 0.0 < tOut2 && tOut2 <= 1.0 ) {
+        cx[ result ] = xOut;
+        cy[ result ] = yOut;
+        ++result;
+      }
+    }
+  }
+
+  if ( result < 3 ) {
+    result = 0; /* Discard any result less than a triangle. */
+  } else { /* Check that the clipped polygon(s) are not entirely degenerate: */
+    const double clipped_polygon_area =
+      ASNAT_signed_area_of_polygon_cpp( result, cx, cy );
+
+    if ( clipped_polygon_area == 0.0 ) {
+      result = 0;
+    }
+  }
+
+  return result;
+}
 
 
 
@@ -285,10 +525,10 @@ NOTES: The export comment below is required!
 
 // [[Rcpp::export]]
 Rcpp::List ASNAT_nearest_site_cpp(const double longitude,
-                                     const double latitude,
-                                     const Rcpp::NumericVector& longitudes,
-                                     const Rcpp::NumericVector& latitudes,
-                                     const Rcpp::IntegerVector& site_ids) {
+                                  const double latitude,
+                                  const Rcpp::NumericVector& longitudes,
+                                  const Rcpp::NumericVector& latitudes,
+                                  const Rcpp::IntegerVector& site_ids) {
 
   const int count = longitudes.length();
   const double* const longitudes0 = longitudes.begin();

@@ -13,9 +13,9 @@
 #           the View (server function) which displays the Model state/data.
 #         Uses RShiny framework to implement the View and Controller.
 #
-#         The phantomjs, pandoc, ffmpeg and curl platform-specific
+#         The phantomjs, pandoc, ffmpeg platform-specific
 #         (Mac, Windows, Linux) executables will be deployed with the ASNAT
-#         script.
+#         script. On Windows this includes curl.exe else /usr/bin/curl is used.
 #         These external programs are invoked to generate output image and
 #         movie files of the map view. The curl program is used to retrieve
 #         data from webservices.
@@ -32,8 +32,8 @@
 # Load required source files:
 ###############################################################################
 
-source("ASNAT_Utilities.R")
-source("ASNAT_Dataset.R")
+#source("ASNAT_Utilities.R")
+#source("ASNAT_Dataset.R")
 source("ASNAT_Model.R")
 
 ###############################################################################
@@ -521,20 +521,24 @@ ui <- fluidPage(
   #    https://github.com/rstudio/shiny/issues/2988
   # 4. Try to reduce the amount of whitespace of map timestamp and legends.
   #    https://github.com/rstudio/leaflet/issues/488
+  # 5. Force places_menu search results to be sorted.
 
   tags$head(
     tags$style(type = "text/css",
                ".scrolling .shiny-bound-input{overflow-y: scroll;}"),
+
     tags$style(type = "text/css",
                "#message_area {width: 100%; height: 80px; overflow: scroll;}"),
+
     tags$style(type = "text/css",
                "#shiny-notification-panel {
                  top: 0; bottom: unset; left: 0; right: 0;
                  margin-left: auto; margin-right: auto;
                  width: 100%;
                  max-width: 450px;
-              }"
+               }"
     ),
+
     tags$script(HTML("
       $(document).ready(function() {
         var objDiv = document.getElementById('message_area');
@@ -545,11 +549,24 @@ ui <- fluidPage(
         observer.observe(objDiv, config);
       })"
     )),
+
+    # HACK: Magic code needed to force places_menu search results to be sorted!
+    # https://stackoverflow.com/questions/75812348/how-to-make-same-order-of-choices-in-selectizeinput-while-clicking-or-typing
+
+    tags$script(HTML("
+      $(document).on('shiny:bound', function(evt) {
+        if (evt.target.id == 'places_menu') {
+          evt.target.selectize.settings.sortField = [{field: '$order'}, {field: '$score'}];
+        }
+      })"
+    )),
+
     tags$style(type = "text/css",
       ".data-load-btn:disabled {
         opacity: 0.5 !important;
         cursor: not-allowed !important;
       }"),
+
     tags$style(HTML("
       .inline-elements {
         display: flex;
@@ -610,8 +627,8 @@ ui <- fluidPage(
                             step = 1L),
 
                shinyBS::bsTooltip("days",
-                                 "Number of days of data to load.",
-                                 options = tooltip_options))
+                                  "Number of days of data to load.",
+                                  options = tooltip_options))
       ),
 
       fluidRow(
@@ -636,14 +653,12 @@ ui <- fluidPage(
                                 "previously retrieved disk cache."),
                          options = tooltip_options),
 
-      # The tags$div() is needed to make selectInput() scolling.
-
-      tags$div(id = "scrolling1", class = "scrolling",
-               selectInput("coverage_menu",
-                           label = "Load Web (control/command-click two):",
-                           multiple = TRUE, selectize = FALSE,
-                           choices = webservice_variables,
-                           size = 24L)),
+      selectInput("coverage_menu",
+                  label = "Load Web (control/command-click two):",
+                  multiple = TRUE, # Allow multiple selections.
+                  selectize = FALSE, # Disable search feature.
+                  choices = webservice_variables,
+                  size = 24L), # Number of rows shown in the scrollable list.
 
       shinyBS::bsTooltip("coverage_menu",
                          paste0("Select one or two variables to retrieve ",
@@ -691,10 +706,11 @@ ui <- fluidPage(
                    label = "Validate Purple Air Key",
                    style = "color : red;"),
 
-      shinyBS::bsTooltip("vslidate_purple_air_key",
-                         paste0("You must validate the Purple Air key ",
-                                "(a webservice call) ",
-                                "before retrieving PurpleAir data."),
+      shinyBS::bsTooltip("validate_purple_air_key",
+                         paste0("Before retrieving PurpleAir data ",
+                                "you must validate the Purple Air key ",
+                                "(a webservice call). ",
+                                "This also updates the Purple Air Sites menu."),
                          options = tooltip_options),
 
       shinyBS::bsModal("invalid_retrieve_data_Modal",
@@ -712,11 +728,10 @@ ui <- fluidPage(
                        )
       ),
 
-      tags$div(id = "scrolling2", class = "scrolling",
-               selectizeInput("purple_air_sites_menu",
-                              label = "Purple Air Sites:",
-                              options = list(maxItems = 1L),
-                              choices = NULL)),
+      selectizeInput("purple_air_sites_menu",
+                     label = "Purple Air Sites:",
+                     options = list(maxItems = 1L, maxOptions = 100000L),
+                     choices = NULL),
 
       shinyBS::bsTooltip("purple_air_sites_menu",
                          paste0("Optionally select a single PurpleAir sensor ",
@@ -728,11 +743,11 @@ ui <- fluidPage(
       tags$a(href = aqs_parameter_codes_url, target = "_blank",
              "AQS Parameter Codes Table"),
 
-      tags$div(id = "scrolling2", class = "scrolling",
-               selectizeInput("aqs_pm25_codes_menu",
-                              label = "AirNow/AQS PM25 parameter codes:",
-                              options = list(maxItems = 1L),
-                              choices = ASNAT_aqs_pm25_codes)),
+      selectizeInput("aqs_pm25_codes_menu",
+                     label = "AirNow/AQS PM25 parameter codes:",
+                     options = list(maxItems = 1L),
+                     selected = aqs_pm25_codes(default_model),
+                     choices = ASNAT_aqs_pm25_codes),
 
       shinyBS::bsTooltip("aqs_pm25_codes_menu",
                          paste0("Optionally select a subset of AirNow/AQS pm25",
@@ -793,15 +808,66 @@ ui <- fluidPage(
       ),
 
       shinyBS::bsPopover("info_icon_import_fileset",
-                      title = NULL,
-                      content = "Currently only accepts offline (SD card) PurpleAir data",
-                      placement = "top",
-                      trigger = "hover",
-                      options = list(container = "body")),
+                         title = NULL,
+                         content = "Currently only accepts offline (SD card) PurpleAir data",
+                         placement = "top",
+                         trigger = "hover",
+                         options = list(container = "body")),
 
       shinyBS::bsTooltip("show_import_fileset",
-                        "Show dialog for loading sensor data from files.",
-                        options = tooltip_options),
+                         "Show dialog for loading sensor data from files.",
+                         options = tooltip_options),
+
+      h1(),
+
+      selectInput("spatial_filter_type_menu",
+                  label = "Optionally Filter Loaded Data by:",
+                  #choices = list("None", "State", "County", "Tribe"),
+                  choices = list("None", "State", "County"),
+                  selected =
+                    paste0(toupper(substr(spatial_filter_type(default_model),
+                                          1L, 1L)),
+                           substr(spatial_filter_type(default_model), 2L,
+                                  nchar(spatial_filter_type(default_model))))),
+
+      shinyBS::bsTooltip("spatial_filter_type_menu",
+                         paste0("Optionally remove data points outside places",
+                                " of interest."),
+                         options = tooltip_options,
+                         placement = "top"),
+
+      # https://shiny.posit.co/r/articles/build/selectize/
+      # Must use selectizeInput() because it supports 'options' which is needed
+      # to increase maxOptions to show all 3,000+ counties.
+      # FIX: Make search results preserve sorted order.
+      # Do not initialize choices with
+      # choices = ASNAT_spatial_names(spatial_filter_type(default_model),
+      #                               west_bound(default_model),
+      #                               south_bound(default_model),
+      #                               east_bound(default_model),
+      #                               north_bound(default_model))
+      # because this generates a warning. Instead initialize in server().
+      # Also, I'd like to force search to only match whole words,
+      # but option respect_word_boundaries = TRUE has no effect.
+
+      selectizeInput("places_menu",
+                     label = "Select one or more places (type to search):",
+                     choices = NULL,
+                     multiple = TRUE,
+                     options = list(maxOptions = 4000L, # Works.
+                                    respect_word_boundaries = TRUE)), # Ignored
+
+      shinyBS::bsTooltip("places_menu",
+                         "Select one or more places of interest.",
+                         options = tooltip_options,
+                         placement = "top"),
+
+      actionButton("filter_data_to_match_places",
+                   label = "Filter Data To Match Above Places"),
+
+      shinyBS::bsTooltip("filter_data_to_match_places",
+                         "Remove data points outside above selected places.",
+                         options = tooltip_options),
 
       h1(),
 
@@ -905,7 +971,7 @@ ui <- fluidPage(
                selectInput("output_format_menu",
                            label = NULL,
                            choices = list("csv", "tsv", "json"),
-                  selected = output_format(default_model))),
+                           selected = output_format(default_model))),
       br(),
 
       shinyBS::bsTooltip("output_format_menu",
@@ -1572,11 +1638,10 @@ ui <- fluidPage(
                                     paste0("Show site id labels."),
                                     options = tooltip_options),
 
-                 tags$div(id = "scrolling3", class = "scrolling",
-                          selectizeInput("neighbors_menu",
-                                         label = "Select Dataset X Site With Neighbors:",
-                                         options = list(maxItems = 1L),
-                                         choices = NULL)),
+                 selectizeInput("neighbors_menu",
+                                label = "Select Dataset X Site With Neighbors:",
+                                options = list(maxItems = 1L),
+                                choices = NULL),
 
                  shinyBS::bsTooltip("neighbors_menu",
                                     paste0("Select a single Dataset X site ",
@@ -2239,7 +2304,6 @@ server <- function(input, output, session) {
       leaflet::addTiles(group = "Roads", options = list(minZoom = 2)) %>%
       leaflet::addLayersControl(position = "topleft",
                                 baseGroups = c("Roads", "Satellite")) %>%
-      # setView(lng = -74.05, lat = 40.72, zoom = 11) %>%
       leaflet::fitBounds(west, south, east, north) %>%
       leaflet::setMaxBounds(-180.0, -90.0, 180.0, 90.0) %>%
       leaflet::addScaleBar(position = "topleft",
@@ -2349,6 +2413,7 @@ server <- function(input, output, session) {
     the_site_neighbor_map <<- leaflet::clearControls(the_site_neighbor_map)
 
     if (dataset_count(model) > 0L) {
+      drew_color_legend <- FALSE
 
       # Get the ranges for each units across all datasets:
 
@@ -2459,180 +2524,186 @@ server <- function(input, output, session) {
           timestep_data_frame <- the_data_frame[matched_rows, ]
         }
 
-        ASNAT_dprint("addMarkers() for %s(%s):\n", source_variable, unit)
-        longitudes <- timestep_data_frame[[2L]]
-        latitudes <- timestep_data_frame[[3L]]
-        measure_column <- variable_column(the_dataset)
-        values <- timestep_data_frame[[measure_column]]
-        column_names <- colnames(timestep_data_frame)
-        id_column <- ASNAT_site_column_index(column_names)
-        ids <- timestep_data_frame[[id_column]]
-        note_column <- length(column_names)
-        notes <- timestep_data_frame[[note_column]]
+        if (nrow(timestep_data_frame) > 0L) {
+          ASNAT_dprint("addMarkers() for %s(%s):\n", source_variable, unit)
+          longitudes <- timestep_data_frame[[2L]]
+          latitudes <- timestep_data_frame[[3L]]
+          measure_column <- variable_column(the_dataset)
+          values <- timestep_data_frame[[measure_column]]
+          column_names <- colnames(timestep_data_frame)
+          id_column <- ASNAT_site_column_index(column_names)
+          ids <- timestep_data_frame[[id_column]]
+          note_column <- length(column_names)
+          notes <- timestep_data_frame[[note_column]]
 
-        if (show_mean_values) {
-          unique_site_ids <- unique(sort.int(ids))
-          site_count <- length(unique_site_ids)
-          site_longitudes <- rep(0, site_count)
-          site_latitudes <- rep(0, site_count)
-          site_values <- rep(0, site_count)
-          site_notes <- rep("", site_count)
+          if (show_mean_values) {
+            unique_site_ids <- unique(sort.int(ids))
+            site_count <- length(unique_site_ids)
+            site_longitudes <- rep(0, site_count)
+            site_latitudes <- rep(0, site_count)
+            site_values <- rep(0, site_count)
+            site_notes <- rep("", site_count)
 
-          for (site_index in seq_along(unique_site_ids)) {
-            id <- unique_site_ids[[site_index]]
-            site_rows <- which(ids == id)
-            value <- mean(values[site_rows], na.rm = TRUE)
-            first_site_index <- site_rows[[1L]]
-            longitude <- longitudes[[first_site_index]]
-            latitude <- latitudes[[first_site_index]]
-            note <- notes[[first_site_index]]
-            site_longitudes[[site_index]] <- longitude
-            site_latitudes[[site_index]] <- latitude
-            site_values[[site_index]] <- value
-            site_notes[[site_index]] <- note
-          }
-
-          ids <- unique_site_ids
-          longitudes <- site_longitudes
-          latitudes <- site_latitudes
-          values <- site_values
-          notes <- site_notes
-        }
-
-        labels <-
-          paste0(source_variable, " = ", values, " id: ", ids, " ", notes)
-        minimum <- minimums[[index]]
-        maximum <- maximums[[index]]
-        selected_colormap_name <- legend_colormap(model)
-        selected_colormap <- NULL
-        use_aqi <- FALSE
-        value_colors <- NULL
-
-        if (selected_colormap_name == "AQI") {
-          variable_units <- paste0(variable, "(", unit, ")")
-
-          if (ASNAT_is_aqi_variable(variable_units)) {
-            is_hourly <- timestep_size(model) == "hours"
-            value_colors <- ASNAT_aqi_colors(variable_units, is_hourly, values)
-          }
-        }
-
-        if (!is.null(value_colors)) {
-          use_aqi <- TRUE
-          selected_colormap <- ASNAT_aqi_colormap
-        } else {
-
-          if (selected_colormap_name == "gray") {
-            selected_colormap <- the_gray_colormap
-          } else if (selected_colormap_name == "blue") {
-            selected_colormap <- the_blue_colormap
-          } else if (selected_colormap_name == "colorsafe") {
-            selected_colormap <- the_colorsafe_colormap
-          } else if (selected_colormap_name == "viridis") {
-            selected_colormap <- the_viridis_colormap
-          } else {
-            selected_colormap <- the_default_colormap
-          }
-
-          value_colors <-
-            data_colors(values, minimum, maximum, selected_colormap)
-        }
-
-        glyph <- map_glyph(the_coverage)
-        glyph_file_template <- glyph_file_name(glyph, "black")
-        stopifnot(file.exists(glyph_file_template))
-        point_glyph_files <- c()
-
-        for (color in value_colors) {
-          this_glyph_file <-
-            gsub(fixed = TRUE, "black", color, glyph_file_template)
-          stopifnot(file.exists(this_glyph_file))
-          point_glyph_files <- append(point_glyph_files, this_glyph_file)
-        }
-
-        enable_hover <- FALSE # Too intrusive/cluttered.
-        enable_popup <- TRUE
-
-        the_map <<- addMarkers(map = the_map,
-                               lng = longitudes,
-                               lat = latitudes,
-                               group = "glyphs_and_legends",
-                               data = values,
-                               label = if (enable_hover) labels else NULL,
-                               popup = if (enable_popup) labels else NULL,
-                               icon = makeIcon(iconUrl = point_glyph_files,
-                                               iconWidth = glyph_size,
-                                               iconHeight = glyph_size,
-                                               popupAnchorX = 0L,
-                                               popupAnchorY = 0L))
-
-        unmatched_units <- is.null(the_unit) || the_unit != unit
-        ASNAT_dprint("index = %d, unmatched_units = %d\n",
-                     index, as.integer(unmatched_units))
-
-        if (unmatched_units) {
-          the_unit <- unit
-          variable_and_units <-
-            paste0(fancy_legend_label(variable),
-                   "(", fancy_legend_label(unit), ")")
-          tick_values <- NULL
-          legend_colors <- NULL
-
-          if (use_aqi) {
-            tick_values <- rev(ASNAT_aqi_names)
-            legend_colors <- rev(ASNAT_aqi_colormap)
-          } else {
-            the_minimum <- minimums[[index]]
-            the_maximum <- maximums[[index]]
-            the_range <- the_maximum - the_minimum
-            the_increment <- the_range / (length(selected_colormap) - 2L)
-            tick_values <- double(0)
-            tick_values <- append(tick_values, -1.0)
-            the_tick_value <- the_minimum
-
-            for (index in 2L:length(selected_colormap) - 1L) {
-              tick_values <- append(tick_values, the_tick_value)
-              the_tick_value <- the_tick_value + the_increment
+            for (site_index in seq_along(unique_site_ids)) {
+              id <- unique_site_ids[[site_index]]
+              site_rows <- which(ids == id)
+              value <- mean(values[site_rows], na.rm = TRUE)
+              first_site_index <- site_rows[[1L]]
+              longitude <- longitudes[[first_site_index]]
+              latitude <- latitudes[[first_site_index]]
+              note <- notes[[first_site_index]]
+              site_longitudes[[site_index]] <- longitude
+              site_latitudes[[site_index]] <- latitude
+              site_values[[site_index]] <- value
+              site_notes[[site_index]] <- note
             }
 
-            tick_values <- round(tick_values, digits = 2L)
-            tick_values <- as.character(tick_values)
-            tick_values[1L] <- paste0("<", round(the_minimum, digits = 2L))
-
-            if (selected_colormap[[1L]] == "black" ||
-                selected_colormap[[1L]] ==
-                  rgb(0L, 0L, 0L, maxColorValue = 255L)) {
-              tick_values[1L] <-
-                paste0("<", round(the_minimum, digits = 2L), " or NA")
-            }
-
-            the_length <- length(tick_values)
-            tick_values[the_length] <- paste0(">", round(the_maximum, digits = 2L))
-
-            # Legend colors must be ordered top-down (high-low) so reverse them:
-
-            tick_values <- rev(tick_values)
-            legend_colors <- rev(selected_colormap)
+            ids <- unique_site_ids
+            longitudes <- site_longitudes
+            latitudes <- site_latitudes
+            values <- site_values
+            notes <- site_notes
           }
 
-          ASNAT_dprint("calling addLegend()\n")
-          the_map <<-
-            addLegend(map = the_map, position = "bottomright",
-                      group = "glyphs_and_legends",
-                      values = NULL,
-                      colors = legend_colors,
-                      labels = tick_values,
-                      title = variable_and_units,
-                      opacity = 1.0)
-        }
+          labels <-
+            paste0(source_variable, " = ", values, " id: ", ids, " ", notes)
+          minimum <- minimums[[index]]
+          maximum <- maximums[[index]]
+          selected_colormap_name <- legend_colormap(model)
+          selected_colormap <- NULL
+          use_aqi <- FALSE
+          value_colors <- NULL
 
-        sources <- append(sources, source)
+          if (selected_colormap_name == "AQI") {
+            variable_units <- paste0(variable, "(", unit, ")")
+
+            if (ASNAT_is_aqi_variable(variable_units)) {
+              is_hourly <- timestep_size(model) == "hours"
+              value_colors <- ASNAT_aqi_colors(variable_units, is_hourly, values)
+            }
+          }
+
+          if (!is.null(value_colors)) {
+            use_aqi <- TRUE
+            selected_colormap <- ASNAT_aqi_colormap
+          } else {
+
+            if (selected_colormap_name == "gray") {
+              selected_colormap <- the_gray_colormap
+            } else if (selected_colormap_name == "blue") {
+              selected_colormap <- the_blue_colormap
+            } else if (selected_colormap_name == "colorsafe") {
+              selected_colormap <- the_colorsafe_colormap
+            } else if (selected_colormap_name == "viridis") {
+              selected_colormap <- the_viridis_colormap
+            } else {
+              selected_colormap <- the_default_colormap
+            }
+
+            value_colors <-
+              data_colors(values, minimum, maximum, selected_colormap)
+          }
+
+          glyph <- map_glyph(the_coverage)
+          glyph_file_template <- glyph_file_name(glyph, "black")
+          stopifnot(file.exists(glyph_file_template))
+          point_glyph_files <- c()
+
+          for (color in value_colors) {
+            this_glyph_file <-
+              gsub(fixed = TRUE, "black", color, glyph_file_template)
+            stopifnot(file.exists(this_glyph_file))
+            point_glyph_files <- append(point_glyph_files, this_glyph_file)
+          }
+
+          enable_hover <- FALSE # Too intrusive/cluttered.
+          enable_popup <- TRUE
+
+          the_map <<- addMarkers(map = the_map,
+                                 lng = longitudes,
+                                 lat = latitudes,
+                                 group = "glyphs_and_legends",
+                                 data = values,
+                                 label = if (enable_hover) labels else NULL,
+                                 popup = if (enable_popup) labels else NULL,
+                                 icon = makeIcon(iconUrl = point_glyph_files,
+                                                 iconWidth = glyph_size,
+                                                 iconHeight = glyph_size,
+                                                 popupAnchorX = 0L,
+                                                 popupAnchorY = 0L))
+
+          unmatched_units <- is.null(the_unit) || the_unit != unit
+          ASNAT_dprint("index = %d, unmatched_units = %d\n",
+                       index, as.integer(unmatched_units))
+
+          if (unmatched_units) {
+            the_unit <- unit
+            variable_and_units <-
+              paste0(fancy_legend_label(variable),
+                     "(", fancy_legend_label(unit), ")")
+            tick_values <- NULL
+            legend_colors <- NULL
+
+            if (use_aqi) {
+              tick_values <- rev(ASNAT_aqi_names)
+              legend_colors <- rev(ASNAT_aqi_colormap)
+            } else {
+              the_minimum <- minimums[[index]]
+              the_maximum <- maximums[[index]]
+              the_range <- the_maximum - the_minimum
+              the_increment <- the_range / (length(selected_colormap) - 2L)
+              tick_values <- double(0)
+              tick_values <- append(tick_values, -1.0)
+              the_tick_value <- the_minimum
+
+              for (index in 2L:length(selected_colormap) - 1L) {
+                tick_values <- append(tick_values, the_tick_value)
+                the_tick_value <- the_tick_value + the_increment
+              }
+
+              tick_values <- round(tick_values, digits = 2L)
+              tick_values <- as.character(tick_values)
+              tick_values[1L] <- paste0("<", round(the_minimum, digits = 2L))
+
+              if (selected_colormap[[1L]] == "black" ||
+                  selected_colormap[[1L]] ==
+                    rgb(0L, 0L, 0L, maxColorValue = 255L)) {
+                tick_values[1L] <-
+                  paste0("<", round(the_minimum, digits = 2L), " or NA")
+              }
+
+              the_length <- length(tick_values)
+              tick_values[the_length] <-
+                paste0(">", round(the_maximum, digits = 2L))
+
+              # Legend colors must be ordered top-down (high-low) so reverse them:
+
+              tick_values <- rev(tick_values)
+              legend_colors <- rev(selected_colormap)
+            }
+
+            ASNAT_dprint("calling addLegend()\n")
+            the_map <<-
+              addLegend(map = the_map, position = "bottomright",
+                        group = "glyphs_and_legends",
+                        values = NULL,
+                        colors = legend_colors,
+                        labels = tick_values,
+                        title = variable_and_units,
+                        opacity = 1.0)
+            drew_color_legend <- TRUE
+          }
+
+          sources <- append(sources, source)
+        } # If non-empty timestep_data_frame
+      } # End loop on datasets.
+
+      if (drew_color_legend) {
+        # Add another legend showing glyph = source:
+
+        unique_sources <- unique(sources)
+        the_map <<- draw_glyph_source_legend_on_map(the_map, unique_sources)
       }
-
-      # Add legend showing glyph = source:
-
-      unique_sources <- unique(sources)
-      the_map <<- draw_glyph_source_legend_on_map(the_map, unique_sources)
     }
 
     ASNAT_elapsed_timer("draw_data_on_map", timer)
@@ -3111,6 +3182,7 @@ server <- function(input, output, session) {
                  west_bound(model), east_bound(model),
                  south_bound(model), north_bound(model))
     update_purple_air_sites_menu()
+    update_places_menu()
   })
 
 
@@ -3152,6 +3224,7 @@ server <- function(input, output, session) {
                  west_bound(model), east_bound(model),
                  south_bound(model), north_bound(model))
     update_purple_air_sites_menu()
+    update_places_menu()
   })
 
 
@@ -3454,7 +3527,7 @@ server <- function(input, output, session) {
 
 
 
-  # Callback for validate_purple_air_key button.
+  # Callback for validate_purple_air_key button (a webservice call).
   # Note this actionButton callback is used instead of a textInput callback for
   # purple_air_key to avoid multiple webservice calls on incomplete input as
   # the user slowly types in their key.
@@ -3472,9 +3545,13 @@ server <- function(input, output, session) {
       ok <- ok(model) # Did webservice call succeed?
 
       if (!ok) {
-        ASNAT_warning("Failed to retrieve PurpleAir site locations.")
+        ASNAT_warning(paste0("Failed to retrieve PurpleAir global site ",
+                             "locations for the specified date range ",
+                             "using the entered key."))
       } else {
-        append_message("Updated PurpleAir sites menu.")
+        append_message(paste0("Key is valid. ",
+                              "Updated PurpleAir global sites menu ",
+                              "for the specified date range."))
       }
 
     } else if (nchar(key) > 0L) {
@@ -3522,6 +3599,82 @@ server <- function(input, output, session) {
 
     if (is_valid_input) {
       aqs_pm25_codes(model) <<- input$aqs_pm25_codes_menu
+    }
+  })
+
+
+
+  # For better performance, update the menu when this server function is called:
+  # https://shiny.posit.co/r/articles/build/selectize/
+
+  updateSelectizeInput(session, "places_menu", server = TRUE,
+                       choices =
+                         ASNAT_spatial_names(spatial_filter_type(model),
+                                             west_bound(model),
+                                             south_bound(model),
+                                             east_bound(model),
+                                             north_bound(model)))
+
+
+
+  # Helper to update places_menu after panning/zooming the map:
+
+  update_places_menu <- function() {
+    ASNAT_dprint("In update_places_menu().\n")
+    place_names <- ASNAT_spatial_names(spatial_filter_type(model),
+                                       west_bound(model),
+                                       south_bound(model),
+                                       east_bound(model),
+                                       north_bound(model))
+    freezeReactiveValue(input, "places_menu")
+    updateSelectizeInput(session, "places_menu", server = TRUE,
+                         choices = place_names)
+  }
+
+
+
+  # Callback for spatial_filter_type_menu:
+
+  observeEvent(input$spatial_filter_type_menu, {
+    ASNAT_dprint("In spatial_filter_type_menu callback.\n")
+    is_valid_input <-
+      shiny::isTruthy(input$spatial_filter_type_menu) &&
+      !is.na(input$spatial_filter_type_menu) &&
+      nchar(input$spatial_filter_type_menu) > 0L &&
+      (input$spatial_filter_type_menu == "None" ||
+      input$spatial_filter_type_menu == "State" ||
+      input$spatial_filter_type_menu == "County" ||
+      input$spatial_filter_type_menu == "Tribe")
+
+    if (is_valid_input) {
+      lowercase_name <- tolower(input$spatial_filter_type_menu)
+      spatial_filter_type(model) <<- lowercase_name
+      update_places_menu()
+    }
+  })
+
+
+
+  # Callback for filter_data_to_match_places button:
+
+  observeEvent(input$filter_data_to_match_places, {
+    ASNAT_dprint("In filter_data_to_match_places callback.\n")
+
+    if (dataset_count(model) > 0L &&
+        spatial_filter_type(model) != "none" &&
+        length(input$places_menu) > 0L) {
+
+      model <<- spatially_filter_datasets(model, input$places_menu)
+      the_map <<- draw_data_on_map()
+      the_map <<- draw_timestamp_on_map()
+      output$map <- leaflet::renderLeaflet(the_map)
+
+      if (dataset_count(model) == 0L) {
+        ASNAT_warning(paste0("No data matched specified places of interest",
+                             " so all loaded data has been filtered-out!"))
+      }
+
+      update_dataset_x_y_selections()
     }
   })
 
@@ -4528,6 +4681,7 @@ server <- function(input, output, session) {
                          zoom = zoom_level)
       output$map <- leaflet::renderLeaflet(the_map)
       update_purple_air_sites_menu()
+      update_places_menu()
     }
   }
 
