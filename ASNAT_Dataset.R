@@ -456,7 +456,8 @@ function(object) {
     row_count <- nrow(the_data_frame)
     nowcast_vector <- rep(as.numeric(NA), row_count)
     flagged_column <- ASNAT_flagged_column_index(column_names)
-    before <- ifelse(flagged_column > 0L, flagged_column - 1L, column_count - 1L)
+    before <-
+      if (flagged_column > 0L) flagged_column - 1L else column_count - 1L
     column_count <- length(column_names)
     rest <- before + 1L
     the_data_frame <- data.frame(the_data_frame[1L:before],

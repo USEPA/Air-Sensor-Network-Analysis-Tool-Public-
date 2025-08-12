@@ -100,7 +100,8 @@ function(app_directory, data_subdirectory = NULL) {
       the_content <- try(silent = TRUE, readLines(output_file_name, 1L))
       unlink(output_file_name)
 
-      if (class(the_content) == "character") {
+      if (class(the_content) == "character" &&
+          grepl("^[0-9]+$", the_content)) {
         value <- as.integer(the_content)
 
         if (value >= 20221001L && value <= 29991231L) {

@@ -52,6 +52,7 @@ methods::setClass(
    purple_air_sites_data_frame = "data.frame", # PurpleAir sites.
    aqs_pm25_codes = "character", # For optional subset of AirNow/AQS pm25 codes.
    spatial_filter_type = "character", # For optional subset of data points.
+   timezone = "character", # Default is "UTC -0000".
    ok = "logical", # Did last command succeed?
    legend_colormap = "character", # Name of legend colormap to use.
    show_mean_values_on_map = "logical", # Show map points colored by mean?
@@ -155,6 +156,8 @@ methods::setValidity("ASNAT_Model", function(object) {
             object@spatial_filter_type == "state" ||
             object@spatial_filter_type == "county" ||
             object@spatial_filter_type == "tribe")
+  stopifnot(nchar(object@timezone) >= 8L)
+  stopifnot(grepl("^[A-Z]+ [+-][0-9][0-9][0-9][0-9]", object@timezone))
   stopifnot(object@ok == FALSE || object@ok == TRUE)
   stopifnot(object@legend_colormap == "default" ||
             object@legend_colormap == "AQI" ||
@@ -310,6 +313,7 @@ function(data_subdirectory = NULL) {
   purple_air_sensor <- 0L
   aqs_pm25_codes <- ASNAT_aqs_pm25_codes[[1L]]
   spatial_filter_type <- "none"
+  timezone <- "UTC -0000"
   legend_colormap <- "default"
   show_mean_values_on_map <- FALSE
   use_fancy_labels <- FALSE
@@ -610,6 +614,13 @@ function(data_subdirectory = NULL) {
               value == "tribe") {
             spatial_filter_type <- value
           }
+        } else if (tag == "timezone") {
+
+          if (nchar(value) >= 8L &&
+              grepl("^[A-Z]+_[+-][0-9][0-9][0-9][0-9]", value)) {
+            value <- gsub(fixed = TRUE, "_", " ", value)
+            timezone <- value
+          }
         }
       }
     }
@@ -663,6 +674,7 @@ function(data_subdirectory = NULL) {
                 purple_air_sites_data_frame = purple_air_sites_data_frame,
                 aqs_pm25_codes = aqs_pm25_codes,
                 spatial_filter_type = spatial_filter_type,
+                timezone = timezone,
                 ok = TRUE,
                 legend_colormap = legend_colormap,
                 show_mean_values_on_map = show_mean_values_on_map,
@@ -817,6 +829,9 @@ function(object) object@aqs_pm25_codes)
 
 ASNAT_declare_method("ASNAT_Model", "spatial_filter_type",
 function(object) object@spatial_filter_type)
+
+ASNAT_declare_method("ASNAT_Model", "timezone",
+function(object) object@timezone)
 
 ASNAT_declare_method("ASNAT_Model", "maximum_neighbor_distance",
 function(object) object@maximum_neighbor_distance)
@@ -1531,6 +1546,22 @@ function(object, value) {
             value == "county" ||
             value == "tribe")
   object@spatial_filter_type <- value
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
+# Change timezone:
+# Example: timezone(asnat_model) <<- "UTC -0000"
+
+ASNAT_declare_method("ASNAT_Model", "timezone<-",
+function(object, value) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(nchar(value) >= 8L)
+  stopifnot(grepl("^[A-Z]+ [+-][0-9][0-9][0-9][0-9]", value))
+  object@timezone <- value
   object@ok <- TRUE
   ASNAT_check(methods::validObject(object))
   return(object)
@@ -3358,6 +3389,7 @@ function(object, coverage) {
 
 
 # Get vector of purple air site and note strings in bounding area.
+# First entry will be site 0 indicating all sites.
 # Example:
 # sites <- purple_air_sites(asnat_model)
 # print(sites)
@@ -3369,20 +3401,34 @@ function(object) {
   ASNAT_check(methods::validObject(object))
   ASNAT_dprint("nrow(object@purple_air_sites_data_frame) = %d\n",
                nrow(object@purple_air_sites_data_frame))
-  result <- NULL
+  all_purple_air_sites <- "0 All sensors in view"
+  result <- all_purple_air_sites
 
   if (nrow(object@purple_air_sites_data_frame) > 0L) {
-    matched_rows <-
-      which(object@purple_air_sites_data_frame[[1L]] >= object@west_bound &
-            object@purple_air_sites_data_frame[[1L]] <= object@east_bound &
-            object@purple_air_sites_data_frame[[2L]] >= object@south_bound &
-            object@purple_air_sites_data_frame[[2L]] <= object@north_bound)
 
-    row_count <- length(matched_rows)
+    if (ASNAT_use_cpp_functions) {
+      result <-
+        ASNAT_get_sites_in_bounds_cpp(object@west_bound,
+                                      object@east_bound,
+                                      object@south_bound,
+                                      object@north_bound,
+                                      all_purple_air_sites,
+                                      object@purple_air_sites_data_frame)
+    } else {
+      longitudes <- object@purple_air_sites_data_frame[[1L]]
+      latitudes <- object@purple_air_sites_data_frame[[2L]]
+      matched_rows <-
+        which(longitudes >= object@west_bound &
+              longitudes <= object@east_bound &
+              latitudes >= object@south_bound &
+              latitudes <= object@north_bound)
+              row_count <- length(matched_rows)
 
-    if (row_count > 0L) {
-      data_frame <- object@purple_air_sites_data_frame[matched_rows, ]
-      result <- paste(data_frame[[3L]], data_frame[[4L]])
+      if (row_count > 0L) {
+        data_frame <- object@purple_air_sites_data_frame[matched_rows, ]
+        result <- paste(data_frame[[3L]], data_frame[[4L]])
+        result <- append(all_purple_air_sites, result)
+      }
     }
   }
 
@@ -3701,6 +3747,7 @@ function(object) {
         "purple_air_sensor ", object@purple_air_sensor, "\n",
         "aqs_pm25_codes ", object@aqs_pm25_codes, "\n",
         "spatial_filter_type ", object@spatial_filter_type, "\n",
+        "timezone ", gsub(fixed = TRUE, " ", "_", object@timezone), "\n",
         "legend_colormap ", object@legend_colormap, "\n",
         "show_mean_values_on_map ", object@show_mean_values_on_map, "\n",
         "use_fancy_labels ", object@use_fancy_labels, "\n",

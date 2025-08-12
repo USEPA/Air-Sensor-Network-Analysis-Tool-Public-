@@ -13,6 +13,7 @@ STATUS:  unreviewed tested
 #include <string.h> // For strncmp().
 #include <stdlib.h> // For atoi().
 #include <limits.h> // For INT_MAX.
+#include <stdio.h>  // For snprintf().
 
 #include <list> // For std::list.
 
@@ -757,5 +758,81 @@ void ASNAT_copy_nowcast_measures_cpp(const int site,
     }
   }
 }
+
+
+
+/******************************************************************************
+PURPOSE: ASNAT_get_sites_in_bounds_cpp - Return a string vector containing
+         "site note" for all sites located within bounds.
+INPUTS:  const double west           West coordinate of bounds.
+         const double east           East coordinate of bounds.
+         const double south          South coordinate of bounds.
+         const double north          North coordinate of bounds.
+         const Rcpp::String& first   First entry of result.
+ const Rcpp::DataFrame& data_frame  Data frame containing site info:
+                                      column 0 = longitudes
+                                      column 1 = latitudes
+                                      column 2 = ids
+                                      column 3 = notes
+OUTPUTS: Rcpp::StringVector          Vector of "site note" for sites in bounds.
+NOTES: The export comment below is required!
+******************************************************************************/
+
+// [[Rcpp::export]]
+Rcpp::StringVector ASNAT_get_sites_in_bounds_cpp(const double west,
+                                                 const double east,
+                                                 const double south,
+                                                 const double north,
+                                                 const Rcpp::String& first,
+                                                 const Rcpp::DataFrame&
+                                                   data_frame) {
+
+  // Get pointers to internal storage to avoid object function-call overhead.
+  // Rcpp::StringVector::const_iterator is not a simple pointer to
+  // Rcpp::String
+  // and trying iterator -= offset results in a crash so just pass address of
+  // Rcpp::StringVector and index it with operator[].
+
+  const Rcpp::NumericVector& longitudes(data_frame[0]);
+  const Rcpp::NumericVector& latitudes(data_frame[1]);
+  const Rcpp::NumericVector& ids(data_frame[2]);
+  const Rcpp::StringVector& notes(data_frame[3]);
+  const double* const longitudes_0 = longitudes.begin();
+  const double* const latitudes_0 = latitudes.begin();
+  const double* const ids_0 = ids.begin();
+  const int rows = longitudes.length();
+  Rcpp::IntegerVector matched_rows(rows, 0);
+  int* const matched_rows_0 = matched_rows.begin();
+  int match_count = 0;
+
+  for (int row = 0; row < rows; ++row) {
+    const double longitude = longitudes_0[row];
+
+    if (longitude >= west && longitude <= east) {
+      const double latitude = latitudes_0[row];
+
+      if (latitude >= south && latitude <= north) {
+        matched_rows_0[match_count] = row;
+        ++match_count;
+      }
+    }
+  }
+
+  Rcpp::StringVector result(match_count + 1, "");
+  result[0] = first;
+
+  for (int row = 0; row < match_count; ++row) {
+    const int matched_row = matched_rows_0[row];
+    const int id = (int) ids_0[matched_row];
+    const Rcpp::String& note(notes[row]);
+    const char* const c_note = note.get_cstring();
+    char buffer[ 80 ] = "";
+    snprintf(buffer, sizeof buffer / sizeof *buffer, "%d %s", id, c_note);
+    result[row + 1] = buffer;
+  }
+
+  return result;
+}
+
 
 

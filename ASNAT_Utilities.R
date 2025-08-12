@@ -235,9 +235,284 @@ if (!exists("USCensusStates") || !exists("USCensusCounties")) {
 }
 
 
+# https://worldtimeconvert.com/timezone
+# This list of timezone codes is more complete than the names in SimpleTimezones
 
-# Get a vector of indices into spatial_dataset of shapes whose bounding
-# rectangle (of at least one of its rings) intersects given bounds.
+ASNAT_timezones_data_frame <-
+  read.delim(sep = "|", check.names = FALSE, strip.white = TRUE, header = TRUE,
+  text = "
+TZ|UTC_OFFSET|NAME
+UTC|-0000|Coordinated Universal Time
+ACDT|+1030|Australian Central Daylight Time
+ACST|+0930|Australian Central Standard Time
+ACT|-0500|Acre Time
+ADT|-0300|Atlantic Daylight Time
+AEDT|+1100|Australian Eastern Daylight Time
+AEST|+1000|Australian Eastern Standard Time
+AFT|+0430|Afghanistan Time
+AKDT|-0800|Alaska Daylight Time
+AKST|-0900|Alaska Standard Time
+ALMT|+0600|Alma-Ata Time
+AMST|-0300|Amazon Summer Time
+AMT|-0400|Amazon Time
+ANAST|+1200|Anadyr Summer Time
+ANAT|+1200|Anadyr Time
+AQTT|+0500|Aqtobe Time
+ART|-0300|Argentina Time
+AST|-0400|Atlantic Standard Time
+AWST|+0800|Australian Western Standard Time
+AZOT|-0100|Azores Time
+AZT|+0400|Azerbaijan Time
+BNT|+0800|Brunei Darussalam Time
+BOT|-0400|Bolivia Time
+BRST|-0200|Brasilia Summer Time
+BRT|-0300|Brasilia Time
+BST|+0100|British Summer Time
+CAT|+0200|Central Africa Time
+CCT|+0630|Cocos Islands Time
+CDT|-0500|Central Daylight Time
+CEST|+0200|Central European Summer Time
+CET|+0100|Central European Time
+CHOST|+0900|Choibalsan Summer Time
+CHOT|+0800|Choibalsan Time
+CHST|+1000|Chamorro Standard Time
+CHUT|+1000|Chuuk Time
+CKT|-1000|Cook Islands Time
+CLST|-0300|Chile Summer Time
+CLT|-0400|Chile Standard Time
+COST|-0400|Colombia Summer Time
+COT|-0500|Colombia Time
+CST|-0600|Central Standard Time
+CT|+0800|China Time
+CVT|-0100|Cape Verde Time
+CXT|+0700|Christmas Island Time
+DAVT|+0700|Davis Time
+DDUT|+1000|Dumont d'Urville Time
+EASST|-0500|Easter Island Summer Time
+EAST|-0600|Easter Island Standard Time
+EAT|+0300|East Africa Time
+ECT|-0500|Ecuador Time
+EDT|-0400|Eastern Daylight Time
+EEST|+0300|Eastern European Summer Time
+EET|+0200|Eastern European Time
+EGT|-0100|East Greenland Time
+EST|-0500|Eastern Standard Time
+FET|+0300|Further-eastern European Time
+FJT|+1200|Fiji Time
+FKST|-0300|Falkland Islands Summer Time
+FKT|-0400|Falkland Islands Time
+FNT|-0200|Fernando de Noronha Time
+GALT|-0600|Galapagos Time
+GAMT|-0900|Gambier Time
+GET|+0400|Georgia Standard Time
+GFT|-0300|French Guiana Time
+GILT|+1200|Gilbert Island Time
+GST|+0400|Gulf Standard Time
+GYT|-0400|Guyana Time
+HADT|-0900|Hawaii-Aleutian Daylight Time
+HAST|-1000|Hawaii-Aleutian Standard Time
+HKT|+0800|Hong Kong Time
+HMT|+0500|Heard and McDonald Islands Time
+HOVT|+0700|Hovd Time
+HST|-1000|Hawaii Standard Time
+ICT|+0700|Indochina Time
+IDT|+0300|Israel Daylight Time
+IOT|+0600|Indian Ocean Time
+IRDT|+0430|Iran Daylight Time
+IRKT|+0800|Irkutsk Time
+IST|+0530|India Standard Time
+JST|+0900|Japan Standard Time
+KST|+0900|Korea Standard Time
+MDT|-0600|Mountain Daylight Time
+MET|+0100|Middle European Time
+MST|-0700|Mountain Standard Time
+MYT|+0800|Malaysia Time
+NZDT|+1300|New Zealand Daylight Time
+NZST|+1200|New Zealand Standard Time
+PDT|-0700|Pacific Daylight Time
+PKT|+0500|Pakistan Standard Time
+PST|-0800|Pacific Standard Time
+SGT|+0800|Singapore Time
+WAT|+0100|West Africa Time
+WIB|+0700|Western Indonesian Time
+WIT|+0900|Eastern Indonesian Time
+WITA|+0800|Central Indonesian Time")
+
+
+
+# Convert signed integer hhmm to fractional signed hour:
+# fractional_hours <- ASNAT_to_decimal_hour(-1215)
+# fractional_hours is -12.25
+
+ASNAT_to_decimal_hour <- function(signed_hhmm) {
+  integer_offset <- as.integer(signed_hhmm)
+
+  # Must use a non-negative integer for correct integer division and modulo:
+
+  offset_scale <- 1.0
+
+  if (integer_offset < 0L) {
+    offset_scale <- -1.0
+    integer_offset <- -integer_offset
+  }
+
+  minutes_per_hour <- 60L
+  result <- offset_scale *
+    (integer_offset %/% 100L + (integer_offset %% 100L) / minutes_per_hour)
+  return(result)
+}
+
+
+
+# Convert the offsets to fractional hours for use in
+# ASNAT_timezones_intersecting_bounds().
+
+ASNAT_decimal_timezone_offsets <-
+  vapply(ASNAT_timezones_data_frame$UTC_OFFSET,
+         ASNAT_to_decimal_hour, 0.0, USE.NAMES = FALSE)
+
+
+
+# Get sorted vector of "name offset" of named timezones
+# or, if name is an offset string ("+08"), then return all names-offsets in
+# ASNAT_timezones_data_frame that match the offset.
+# or else if no matching found, return NULL.
+
+ASNAT_timezone_name_offset <- function(names) {
+  result <- NULL
+
+  # Process names that match known timezone names:
+
+  matched_indices <- which(ASNAT_timezones_data_frame$TZ %in% names)
+
+  if (length(matched_indices) > 0L) {
+    result <-
+      paste(ASNAT_timezones_data_frame$TZ[matched_indices],
+            sprintf("%+05d",
+                    ASNAT_timezones_data_frame$UTC_OFFSET[matched_indices]))
+  }
+
+  # Process names that are just string offsets like "+12" or "-08":
+
+  matched_indices <- which(substr(names, 1L, 1L) %in% c("+", "-"))
+
+  if (length(matched_indices) > 0L) {
+    offsets <- as.numeric(names[matched_indices])
+    offsets <- offsets[offsets != 0.0]
+
+    if (length(offsets) > 0L) {
+      matched_indices <- which(ASNAT_decimal_timezone_offsets %in% offsets)
+
+      if (length(matched_indices) > 0L) {
+        result <-
+          paste(ASNAT_timezones_data_frame$TZ[matched_indices],
+                sprintf("%+05d",
+                        ASNAT_timezones_data_frame$UTC_OFFSET[matched_indices]))
+      }
+    }
+  }
+
+  return(result)
+}
+
+
+
+# Get sorted vector of each timezone "name offset" within bounds:
+
+ASNAT_timezones_intersecting_bounds <- function(west, south, east, north) {
+  stopifnot(west >= -180.0)
+  stopifnot(east >= west)
+  stopifnot(east <= 180.0)
+  stopifnot(south >= -90.0)
+  stopifnot(north >= south)
+  stopifnot(north <= 90.0)
+
+  result <- "UTC -0000"
+  shape_indices <-
+    ASNAT_indices_of_shapes_intersecting_bounds(west, south, east, north,
+                                                SimpleTimezones)
+
+  if (length(shape_indices) > 0L) {
+    timer <- ASNAT_start_timer()
+
+    # Note SimpleTimezones names are incomplete - i.e., sometimes just an
+    # offset like "+08".
+    # Get found names or else all names matching offsets in
+    # ASNAT_timezones_data_frame.
+
+    names <- unique(sort(toupper(
+      append(SimpleTimezones$timezone_STD_abbreviation[shape_indices],
+             SimpleTimezones$timezone_DST_abbreviation[shape_indices]))))
+
+    names <- names[names != "GMT"]
+    names <- names[names != "UTC"]
+
+    if (length(names) > 0L) {
+      names_offsets <- ASNAT_timezone_name_offset(names)
+
+      if (!is.null(names_offsets)) {
+        names_offsets <- unique(names_offsets)
+        result <- append(result, names_offsets)
+      }
+    }
+
+    ASNAT_elapsed_timer("ASNAT_timezones_intersecting_bounds:", timer)
+  }
+
+  return(result)
+}
+
+
+
+# Get non-UTC hourly timestamp, "2022-06-01T00:00" -> "2022-05-31 19:00 EDT"
+
+ASNAT_non_utc_timestamp <-
+function(the_start_date, the_hour_timestep, other_tz_offset) {
+  stopifnot(class(the_start_date) == "Date")
+  stopifnot(is.numeric(the_hour_timestep))
+  stopifnot(as.integer(the_hour_timestep) >= 0L)
+  stopifnot(nchar(other_tz_offset) >= 8L)
+  stopifnot(length(unlist(strsplit(other_tz_offset, " "))) == 2L)
+
+  parts <- unlist(strsplit(other_tz_offset, " "))
+  name <- parts[[1L]]
+  offset <- parts[[2L]]
+  hours_offset <- ASNAT_to_decimal_hour(as.integer(offset))
+
+  minutes_per_hour <- 60L
+  seconds_per_minute <- 60L
+  seconds_per_hour <- minutes_per_hour * seconds_per_minute
+  seconds_offset <- (the_hour_timestep + hours_offset) * seconds_per_hour
+  time_0 <- as.POSIXct(as.character(the_start_date))
+  time_h <- time_0 + seconds_offset
+  result <- format(time_h, "%Y-%m-%d %H:%M")
+  result <- paste(result, name)
+  stopifnot(nchar(result) == 16L + 1L + nchar(name))
+  return(result)
+}
+
+
+
+# Offset hourly timestamp:
+
+ASNAT_offset_timestamp <- function(iso_timestamp, offset_hours) {
+  stopifnot(nchar(iso_timestamp) >= 16L)
+  stopifnot(is.numeric(offset_hours))
+  minutes_per_hour <- 60L
+  seconds_per_minute <- 60L
+  seconds_per_hour <- minutes_per_hour * seconds_per_minute
+  seconds_offset <- offset_hours * seconds_per_hour
+  time_0 <-
+    as.POSIXct(substr(iso_timestamp, 1L, 16L), "%Y-%m-%dT%H:%M", tz = "UTC")
+  time_h <- time_0 + seconds_offset
+  result <- format(time_h, "%Y-%m-%dT%H:%M")
+  stopifnot(nchar(result) == 16L)
+  return(result)
+}
+
+
+
+# Get a vector of indices into spatial_dataset of shapes intersecting bounds.
 
 ASNAT_indices_of_shapes_intersecting_bounds <-
 function(west, south, east, north, spatial_dataset) {
@@ -580,7 +855,7 @@ ASNAT_signed_area_of_polygon <- function(count, x, y) {
 
 
 
-# Get vector of spatial place names for type near given view bounds:
+# Get vector of spatial place names for type within view bounds:
 
 ASNAT_spatial_names <- function(spatial_filter_type,
                                 west, south, east, north) {

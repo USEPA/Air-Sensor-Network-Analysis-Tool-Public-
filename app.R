@@ -116,7 +116,6 @@ nowcast_url <-
 # "https://www.epa.gov/sites/default/files/2018-01/documents/nowcastfactsheet.pdf"
 # "https://rdrr.io/cran/AirMonitor/src/R/monitor_nowcast.R"
 
-all_purple_air_sites <- "0 All sensors in view"
 all_dataset_x_neighbor_sites <- "0 All Sites"
 
 # FIX: Sizes other than 992 x 744 make the saved image unmatched!
@@ -213,11 +212,22 @@ webservice_variable_metadata <- list(
   "" # End of list.
 )
 
+webservice_local_daily_variable_metadata <- list(
+  "AQS.ozone_8hour_average|ppb|Local daily surface measured ozone 8-hour average.",
+  "AQS.ozone_8hour_maximum|ppb|Local daily surface measured ozone 8-hour maximum.",
+  "AQS.pm25_daily_filter|ppb|Local daily surface measured particulate matter (aerosols) 2.5 microns or smaller in diameter.",
+  "" # End of list.
+)
+
 # Construct lists used for menus and tooltips:
 
 webservice_variables <- list()
 webservice_units <- list()
 webservice_descriptions <- list()
+
+webservice_local_daily_variables <- list()
+webservice_local_daily_units <- list()
+webservice_local_daily_descriptions <- list()
 
 initialize_variable_lists <- function() {
   count <- 0L
@@ -231,6 +241,20 @@ initialize_variable_lists <- function() {
       webservice_variables[count] <<- parts[[1L]]
       webservice_units[count] <<- parts[[2L]]
       webservice_descriptions[count] <<- parts[[3L]]
+    }
+  }
+
+  count <- 0L
+
+  for (entry in webservice_local_daily_variable_metadata) {
+
+    if (entry != "") {
+      parts <- unlist(strsplit(entry, "|", fixed = TRUE))
+      stopifnot(length(parts) == 3L)
+      count <- count + 1L
+      webservice_local_daily_variables[count] <<- parts[[1L]]
+      webservice_local_daily_units[count] <<- parts[[2L]]
+      webservice_local_daily_descriptions[count] <<- parts[[3L]]
     }
   }
 }
@@ -618,7 +642,7 @@ ui <- fluidPage(
         shinyBS::bsTooltip("start_date",
                            "Starting date of data to load.",
                            options = tooltip_options)),
-        column(3L,
+        column(4L,
                numericInput("days", label = "Days:",
                             #width = "100px",
                             value = days(default_model),
@@ -632,16 +656,19 @@ ui <- fluidPage(
       ),
 
       fluidRow(
-        column(4L,
+        column(5L,
                selectInput("timestep_size",
                            label = "Timestep:  ",
                            #width = "120px",
-                           choices = list("hours", "days"),
+                           choices = list("hours", "days", "local daily"),
                            selected = timestep_size(default_model)),
 
                shinyBS::bsTooltip("timestep_size",
-                                  "Timestep size and data aggregation.",
-                                  placement = "top",
+                                  paste0("Timestep size and data aggregation. ",
+                                          "Local daily shows ",
+                                          "variables aggregated to local ",
+                                          "(non_UTC) hours."),
+                                  placement = "right",
                                   options = tooltip_options))
       ),
 
@@ -1067,6 +1094,17 @@ ui <- fluidPage(
                  shinyBS::bsTooltip("timestep_slider",
                                     "Set timestep to display.",
                                     options = tooltip_options),
+
+                 selectizeInput("timezones_menu",
+                                label = "Select a timezone for labeling:",
+                                choices = NULL),
+
+                 shinyBS::bsTooltip("timezones_menu",
+                                     paste0("Selected timezone only affects ",
+                                            "hourly map and timeseries plot ",
+                                            "labels - not data."),
+                                     options = tooltip_options,
+                                     placement = "right"),
 
                  actionButton("zoom_to_data", label = "Zoom To Data"),
 
@@ -2719,8 +2757,9 @@ server <- function(input, output, session) {
 
     the_label <- NULL
     show_mean_values <- show_mean_values_on_map(model)
+    is_local_daily <- input$timestep_size == "local daily"
 
-    if (show_mean_values) { # Draw the timestamp as YYYY-MM-DD - YYYY-MM-DD:
+    if (show_mean_values) { # Draw YYYY-MM-DD - YYYY-MM-DD:
       first_timestamp <- first_timestamp(model)
       yyyy_mm_dd <- substr(first_timestamp, 1L, 10L)
       the_label <- yyyy_mm_dd
@@ -2731,6 +2770,9 @@ server <- function(input, output, session) {
         the_label <- paste(the_label, "-", yyyy_mm_dd)
       }
 
+      if (!is_local_daily) {
+        the_label <- paste(the_label, "UTC")
+      }
     } else { # Draw the timestamp as YYYY-MM-DD HH:00 UTC:
       the_timestamp <- timestamp(model)
       yyyy_mm_dd <- substr(the_timestamp, 1L, 10L)
@@ -2739,10 +2781,22 @@ server <- function(input, output, session) {
 
       if (timestep_size(model) == "hours") {
         the_label <- paste(the_label, hh_mm)
+        the_label <- paste(the_label, "UTC")
+
+        # If using non-UTC timezone then append timestamp for that timezone:
+
+        model_timezone <- timezone(model)
+
+        if (model_timezone != "UTC -0000") {
+         non_utc_label <-
+           ASNAT_non_utc_timestamp(start_date(model), timestep(model),
+                                   model_timezone)
+         the_label <- paste0(the_label, " = ", non_utc_label)
+        }
+      } else if (!is_local_daily) {
+        the_label <- paste(the_label, "UTC")
       }
     }
-
-    the_label <- paste(the_label, "UTC")
 
     timestamp_label <- paste0("<label>", the_label, "</label>")
     timestamp_html <- tags$div(HTML(timestamp_label))
@@ -2757,29 +2811,9 @@ server <- function(input, output, session) {
   # Update Purple Air Sites Menu for changed viewing area:
 
   update_purple_air_sites_menu <- function() {
-    selection <- all_purple_air_sites
-
-    is_valid_input <-
-      shiny::isTruthy(input$purple_air_sites_menu) &&
-      !is.na(input$purple_air_sites_menu) &&
-      nchar(input$purple_air_sites_menu) > 0L
-
-    if (is_valid_input) {
-      selection <- input$purple_air_sites_menu
-    }
-
-    sites <- append(all_purple_air_sites, purple_air_sites(model))
-    found_index <- grep(fixed = TRUE, selection, sites)
-
-    if (length(found_index) == 1L) {
-      selection <- sites[[found_index]]
-    } else {
-      selection <- all_purple_air_sites
-    }
-
+    sites <- purple_air_sites(model)
     ASNAT_dprint("updating selectizeInput() in server() with %d items.\n",
                  length(sites))
-
     freezeReactiveValue(input, "purple_air_sites_menu")
     updateSelectizeInput(session, "purple_air_sites_menu",
                          choices = sites, server = TRUE)
@@ -3183,6 +3217,7 @@ server <- function(input, output, session) {
                  south_bound(model), north_bound(model))
     update_purple_air_sites_menu()
     update_places_menu()
+    update_timezones_menu()
   })
 
 
@@ -3225,6 +3260,7 @@ server <- function(input, output, session) {
                  south_bound(model), north_bound(model))
     update_purple_air_sites_menu()
     update_places_menu()
+    update_timezones_menu()
   })
 
 
@@ -3371,18 +3407,41 @@ server <- function(input, output, session) {
     ASNAT_debug(str, list(input$timestep_size))
 
     if (shiny::isTruthy(input$timestep_size) &&
-        input$timestep_size == "hours" ||
-        input$timestep_size == "days") {
-      timestep_size(model) <<- input$timestep_size
+        (input$timestep_size == "hours" ||
+        input$timestep_size == "days" ||
+        input$timestep_size == "local daily")) {
+
+      the_timestep_size <- input$timestep_size
+
+      if (input$timestep_size == "local daily") {
+        delete_all_loaded_data()
+        the_timestep_size <- "days"
+      }
+
+      timestep_size(model) <<- the_timestep_size
+
+      if (the_timestep_size != "hours") {
+        timezone(model) <<- "UTC -0000"
+      }
+
+      the_map <<- draw_timestamp_on_map()
+      update_timezones_menu()
       ASNAT_dprint("Set timestep_size(model) = %s\n", timestep_size(model))
       model_timestep <- timestep(model)
       last_model_timestep <- timesteps(model) - 1L
-      ASNAT_dprint("Reseting timestep_slider to %d, last_model_timestep = %d\n",
+      ASNAT_dprint("Reset timestep_slider to %d, last_model_timestep = %d\n",
                    model_timestep, last_model_timestep)
       freezeReactiveValue(input, "timestep_slider")
       updateSliderInput(session = session, inputId = "timestep_slider",
                         value = model_timestep,
                         min = 0L, max = last_model_timestep, step = 1L)
+      freezeReactiveValue(input, "coverage_menu")
+      updateSelectInput(session = session, inputId = "coverage_menu",
+                        choices =
+                          if (input$timestep_size == "local daily")
+                              webservice_local_daily_variables else
+                              webservice_variables,
+                        selected = character(0))
     }
 
     ASNAT_dprint("returning with:\n")
@@ -3435,10 +3494,9 @@ server <- function(input, output, session) {
 
 
 
-  # Callback for Delete All Loaded Data button:
+  # Helper to delete all loaded data:
 
-  observeEvent(input$delete_data, {
-    ASNAT_dprint("In delete_data callback.\n")
+  delete_all_loaded_data <- function() {
     model <<- delete_datasets(model)
     ASNAT_dprint("model dataset count = %d\n", dataset_count(model))
 
@@ -3482,17 +3540,16 @@ server <- function(input, output, session) {
     # and bounds collapse to a point. User must click Reset Map button.
 
     clear_tables_and_plots()
-  })
+    data_loaded(FALSE)
+  }
 
 
- input_focused <- reactiveVal(FALSE)
 
+  # Callback for Delete All Loaded Data button:
 
-  # JavaScript to detect first focus on the input:
-
-  observe({
-    session$sendCustomMessage(type = "trackFocus",
-                              message = list(id = "purple_air_key"))
+  observeEvent(input$delete_data, {
+    ASNAT_dprint("In delete_data callback.\n")
+    delete_all_loaded_data()
   })
 
 
@@ -4588,12 +4645,10 @@ server <- function(input, output, session) {
       shinyjs::show(id = "timestep_slider")
     }
 
-    # If there is data then redraw it on map with appropriate timestamp label:
-
-    if (dataset_count(model) > 0L) {
-      model_timestep <- timestep(model)
-      update_map_timestep(model_timestep)
-    }
+    the_map <<- draw_data_on_map()
+    the_map <<- draw_timestamp_on_map()
+    update_timezones_menu()
+    output$map <- leaflet::renderLeaflet(the_map)
   })
 
 
@@ -4610,6 +4665,72 @@ server <- function(input, output, session) {
       if (the_timestep >= 0L && the_timestep < timesteps(model)) {
         update_map_timestep(the_timestep)
       }
+    }
+  })
+
+
+
+  # For better performance, update the menu when this server function is called:
+  # https://shiny.posit.co/r/articles/build/selectize/
+
+  updateSelectizeInput(session, "timezones_menu", server = TRUE,
+                       choices =
+                         if (timestep_size(model) != "hours") "UTC -0000" else
+                           ASNAT_timezones_intersecting_bounds(
+                             west_bound(model), south_bound(model),
+                             east_bound(model), north_bound(model)))
+
+
+
+  # Helper to update timezones_menu after panning/zooming the map:
+
+  update_timezones_menu <- function() {
+    ASNAT_dprint("In update_timezones_menu().\n")
+    model_timestep_size <- timestep_size(model)
+    model_timezone <- NULL
+    timezone_names <- NULL
+
+    if (model_timestep_size != "hours" || show_mean_values_on_map(model)) {
+      timezone_names <- "UTC -0000"
+      model_timezone <- timezone_names
+      timezone(model) <<- model_timezone
+    } else {
+      timezone_names <-
+        ASNAT_timezones_intersecting_bounds(west_bound(model),
+                                            south_bound(model),
+                                            east_bound(model),
+                                            north_bound(model))
+      model_timezone <- timezone(model)
+
+      if (model_timezone != "UTC -0000" &&
+          !(model_timezone %in% timezone_names)) {
+        model_timezone <- "UTC -0000"
+        timezone(model) <<- model_timezone
+      }
+    }
+
+    freezeReactiveValue(input, "timezones_menu")
+    updateSelectizeInput(session, "timezones_menu", server = TRUE,
+                         choices = timezone_names,
+                         selected = model_timezone)
+  }
+
+
+
+  # Callback for timezones_menu:
+
+  observeEvent(input$timezones_menu, {
+    ASNAT_dprint("In timezones_menu callback.\n")
+    is_valid_input <-
+      shiny::isTruthy(input$timezones_menu) &&
+      !is.na(input$timezones_menu) &&
+      nchar(input$timezones_menu) > 0L
+
+    if (is_valid_input) {
+      selected_timezone <- input$timezones_menu
+      timezone(model) <<- selected_timezone
+      the_map <<- draw_timestamp_on_map()
+      output$map <- leaflet::renderLeaflet(the_map)
     }
   })
 
@@ -4682,6 +4803,7 @@ server <- function(input, output, session) {
       output$map <- leaflet::renderLeaflet(the_map)
       update_purple_air_sites_menu()
       update_places_menu()
+      update_timezones_menu()
     }
   }
 
@@ -4820,7 +4942,7 @@ server <- function(input, output, session) {
     check_set_reset_output_directory()
     timer <- ASNAT_start_timer()
     model_timesteps <-
-      ifelse(show_mean_values_on_map(model), 1L, timesteps(model))
+      if (show_mean_values_on_map(model)) 1L else timesteps(model)
     model_timesteps_1 <- model_timesteps - 1L
     model_timestep <- timestep(model)
     model_output_directory <- output_directory(model)
@@ -6649,7 +6771,7 @@ server <- function(input, output, session) {
     averaging <- "Hourly"
     timestamp_length <- 13L
 
-    if (model_timestep_size == "days") {
+    if (model_timestep_size != "hours") {
       averaging <- "Daily"
       timestamp_length <- 10L
     }
@@ -6667,11 +6789,11 @@ server <- function(input, output, session) {
     main_title <-
       sprintf("Dataset Summary: %s %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
               averaging,
-              ifelse(interactive, fancy_source_variable, source_variable),
+              if (interactive) fancy_source_variable else source_variable,
               date_range, west, east, south, north)
 
     y_label <-
-      paste0(ifelse(interactive, fancy_variable, the_variable),
+      paste0(if (interactive) fancy_variable else the_variable,
              "(", units, ")")
 
     # If plotting a single site with its neighbors then recreate main title:
@@ -6696,8 +6818,8 @@ server <- function(input, output, session) {
       main_title <-
         sprintf("%s Site %d Neighbors (<= %dm) Summary:\n%s %s vs %s\n%s (%0.4f, %0.4f)",
                 source, single_site_id, neighbor_distance, averaging,
-                ifelse(interactive, fancy_source_variable, source_variable),
-                ifelse(interactive, fancy_neighbor_source_variable, neighbor_source_variable),
+                if (interactive) fancy_source_variable else source_variable,
+                if (interactive) fancy_neighbor_source_variable else neighbor_source_variable,
                 date_range, longitude, latitude)
     }
 
@@ -6734,7 +6856,7 @@ server <- function(input, output, session) {
     ASNAT_dprint("Rendering boxplot with %s\n", source_variable)
     ASNAT_debug(str, subset_data_frame)
 
-    x_label <- ifelse(is_single_site, "Site_Id", "Site_Id (0 = all)")
+    x_label <- if (is_single_site) "Site_Id" else "Site_Id (0 = all)"
     pdf_file <- NULL
 
     if (save_to_file) {
@@ -6916,7 +7038,8 @@ server <- function(input, output, session) {
       subset_data_frame <- data_frame[matched_rows, ]
       measures <- subset_data_frame[[measure_column]]
       flagged <- subset_data_frame[[flagged_column]]
-      point_colors <- ifelse(flagged == "0", "black", flagged_point_color)
+      point_colors <- rep("black", length(flagged))
+      point_colors[flagged != "0"] <- flagged_point_color
       timestamps <- subset_data_frame[[timestamp_column]]
       timestamp_labels <-
         as.POSIXct(timestamps, timestamp_format, tz = "UTC")
@@ -6926,9 +7049,9 @@ server <- function(input, output, session) {
       symbol <- NULL
 
       if (!interactive) {
-        symbol <- ifelse(is.null(result), 0L, 1L)
+        symbol <- if (is.null(result)) 0L else 1L
       } else {
-        symbol <- ifelse(is.null(result), "circle-open", "o")
+        symbol <- if (is.null(result)) "circle-open" else "o"
       }
 
       result <-
@@ -6994,15 +7117,16 @@ server <- function(input, output, session) {
     flagged_point_color <- "gray"
 
     flagged <- data_frame[[flagged_column]]
-    point_colors <- ifelse(flagged == "0", "black", flagged_point_color)
+    point_colors <- rep("black", length(flagged))
+    point_colors[flagged != "0"] <- flagged_point_color
     has_flagged_points <-
       length(which(data_frame[[flagged_column]] != "0")) > 0L
 
     neighbor_point_colors <- NULL
 
     if (!is.null(neighbor_data_frame)) {
-      neighbor_point_colors <-
-        ifelse(flagged == "0", "black", flagged_point_color)
+      neighbor_point_colors <- rep("black", length(flagged))
+      neighbor_point_colors[flagged != "0"] <- flagged_point_color
       has_flagged_points <- has_flagged_points ||
         (length(which(neighbor_data_frame[[neighbor_flagged_column]] != "0"))
          > 0L)
@@ -7219,7 +7343,7 @@ server <- function(input, output, session) {
     timestamp_length <- 13L
     timestamp_format <- "%Y-%m-%dT%H"
 
-    if (model_timestep_size == "days") {
+    if (model_timestep_size != "hours") {
       averaging <- "Daily"
       timestamp_length <- 10L
       timestamp_format <- "%Y-%m-%d"
@@ -7227,8 +7351,45 @@ server <- function(input, output, session) {
 
     first_model_timestamp <- substr(first_model_timestamp, 1L, timestamp_length)
     last_model_timestamp <- substr(last_model_timestamp, 1L, timestamp_length)
+    x_label <-
+      paste0(if (model_timestep_size == "hours") "Hours" else "Days",
+             " from ", first_model_timestamp, " to ", last_model_timestamp)
     time_0 <- as.POSIXct(first_model_timestamp, timestamp_format, tz = "UTC")
     time_last <- as.POSIXct(last_model_timestamp, timestamp_format, tz = "UTC")
+
+    # If hourly and non-UTC timezone then edit labels and timestamps:
+
+    model_timezone <- timezone(model)
+
+    if (model_timestep_size == "hours" && model_timezone != "UTC -0000") {
+      non_utc_first_timestamp <-
+        ASNAT_non_utc_timestamp(start_date(model), 0L, model_timezone)
+      non_utc_last_timestamp <-
+        ASNAT_non_utc_timestamp(start_date(model), timesteps(model) - 1L,
+                                model_timezone)
+      x_label <-
+        paste0("Hours from ", non_utc_first_timestamp, " to ",
+                non_utc_last_timestamp)
+      timestamp_format <- "%Y-%m-%dT%H:%M"
+      non_utc_first_timestamp <-
+        paste0(substr(non_utc_first_timestamp, 1L, 10L), "T",
+               substr(non_utc_first_timestamp, 12L, 16L))
+      non_utc_last_timestamp <-
+        paste0(substr(non_utc_last_timestamp, 1L, 10L), "T",
+               substr(non_utc_last_timestamp, 12L, 16L))
+      time_0 <-
+        as.POSIXct(non_utc_first_timestamp, timestamp_format, tz = "UTC")
+      time_last <-
+        as.POSIXct(non_utc_last_timestamp, timestamp_format, tz = "UTC")
+      parts <- unlist(strsplit(model_timezone, " "))
+      offset <- parts[[2L]]
+      hours_offset <- ASNAT_to_decimal_hour(as.integer(offset))
+      timestamps <- subset_data_frame[[1L]]
+      timestamps <-
+        vapply(timestamps, ASNAT_offset_timestamp, c(""), hours_offset,
+               USE.NAMES = FALSE)
+      subset_data_frame[1L] <- timestamps
+    }
 
     # Get bounds of viewing area:
 
@@ -7240,16 +7401,12 @@ server <- function(input, output, session) {
     main_title <-
       sprintf("Dataset %s Time-series: %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
               averaging,
-              ifelse(interactive, fancy_source_variable, source_variable),
+              if (interactive) fancy_source_variable else source_variable,
               date_range, west, east, south, north)
 
     y_label <-
-      paste0(ifelse(interactive, fancy_variable, the_variable),
+      paste0(if (interactive) fancy_variable else the_variable,
              "(", units, ")")
-
-    x_label <-
-      paste0(if (model_timestep_size == "hours") "Hours" else "Days",
-             " from ", first_model_timestamp, " to ", last_model_timestamp)
 
     # If plotting a single site with its neighbors then recreate main title:
 
@@ -7276,8 +7433,8 @@ server <- function(input, output, session) {
       main_title <-
         sprintf("%s Site %d Neighbors (<= %dm) %s Time-Series:\n%s vs %s\n%s (%0.4f, %0.4f)",
                 source, single_site_id, neighbor_distance, averaging,
-                ifelse(interactive, fancy_source_variable, source_variable),
-                ifelse(interactive, fancy_neighbor_source_variable, neighbor_source_variable),
+                if (interactive) fancy_source_variable else source_variable,
+                if (interactive) fancy_neighbor_source_variable else neighbor_source_variable,
                 date_range, longitude, latitude)
     }
 
@@ -7900,8 +8057,8 @@ server <- function(input, output, session) {
         } else {
 
           if (is.null(point_colors)) {
-            point_colors <-
-              ifelse(data_frame[[6L]] == "0", "black", flagged_point_color)
+            point_colors <- rep("black", nrow(data_frame))
+            point_colors[data_frame[[6L]] != "0"] <- flagged_point_color
           }
 
           has_flagged_points <- length(which(data_frame[[6L]] != "0")) > 0L
@@ -8129,7 +8286,7 @@ server <- function(input, output, session) {
     averaging <- "Hourly"
     timestamp_length <- 13L
 
-    if (model_timestep_size == "days") {
+    if (model_timestep_size != "hours") {
       averaging <- "Daily"
       timestamp_length <- 10L
     }
@@ -8147,7 +8304,7 @@ server <- function(input, output, session) {
     main_title <-
       sprintf("Dataset AQI Summary: %s %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
               averaging,
-              ifelse(interactive, fancy_source_variable, source_variable),
+              if (interactive) fancy_source_variable else source_variable,
               date_range, west, east, south, north)
 
     # If plotting a single site with its neighbors then recreate main title:
@@ -8170,8 +8327,8 @@ server <- function(input, output, session) {
       main_title <-
         sprintf("%s Site %d Neighbors (<= %dm) AQI Summary:\n%s %s vs %s\n%s (%0.4f, %0.4f)",
                 source, single_site_id, neighbor_distance, averaging,
-                ifelse(interactive, fancy_source_variable, source_variable),
-                ifelse(interactive, fancy_neighbor_source_variable, neighbor_source_variable),
+                if (interactive) fancy_source_variable else source_variable,
+                if (interactive) fancy_neighbor_source_variable else neighbor_source_variable,
                 date_range, longitude, latitude)
     }
 
@@ -8232,7 +8389,7 @@ server <- function(input, output, session) {
       c("site_id", gsub(fixed = TRUE, " ", "_", ASNAT_aqi_names))
 
 
-    x_label <- ifelse(is_single_site, "Site_Id", "Site_Id (0 = all)")
+    x_label <- if (is_single_site) "Site_Id" else "Site_Id (0 = all)"
     y_label <- "Percentage of each site's measures in AQI categories"
 
     ASNAT_dprint("Rendering aqi_summary_plot with %s\n", source_variable)
@@ -8819,7 +8976,7 @@ server <- function(input, output, session) {
     model_timestep_size <- timestep_size(model)
     averaging <- "Hourly"
 
-    if (model_timestep_size == "days") {
+    if (model_timestep_size != "hours") {
       averaging <- "Daily"
     }
 
@@ -8830,13 +8987,13 @@ server <- function(input, output, session) {
     south <- south_bound(the_dataset)
     north <- north_bound(the_dataset)
     count <- nrow(neighbor_statistics_data_frame)
-    unflagged_string <- ifelse(only_unflagged, "Unflagged ", "")
+    unflagged_string <- if (only_unflagged) "Unflagged " else ""
 
     main_title <-
       sprintf("%d %sNeighbors (<= %dm) Statistics:\n%s %s vs %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
               count, unflagged_string, neighbor_distance, averaging,
-              ifelse(interactive, fancy_source_variable, source_variable),
-              ifelse(interactive, fancy_neighbor_source_variable, neighbor_source_variable),
+              if (interactive) fancy_source_variable else source_variable,
+              if (interactive) fancy_neighbor_source_variable else neighbor_source_variable,
               date_range, west, east, south, north)
 
     # If plotting a single site with its neighbors then recreate main title:
@@ -8852,8 +9009,8 @@ server <- function(input, output, session) {
         sprintf("%s Site %d %sNeighbors (<= %dm) Statistics:\n%s %s vs %s\n%s (%0.4f, %0.4f)",
                 source, selected_dataset_x_site, unflagged_string,
                 neighbor_distance, averaging,
-                ifelse(interactive, fancy_source_variable, source_variable),
-                ifelse(interactive, fancy_neighbor_source_variable, neighbor_source_variable),
+                if (interactive) fancy_source_variable else source_variable,
+                if (interactive) fancy_neighbor_source_variable else neighbor_source_variable,
                 date_range, longitude, latitude)
     }
 
@@ -8876,7 +9033,7 @@ server <- function(input, output, session) {
                "_vs_",
                gsub(fixed = TRUE, ".", "_", neighbor_source_variable),
                "_statistics_boxplots",
-               ifelse(only_unflagged, "_unflagged.pdf", ".pdf"))
+               if (only_unflagged) "_unflagged.pdf" else ".pdf")
 
       saved_plot_files <<- append(saved_plot_files, file_name)
     }
@@ -9526,13 +9683,6 @@ server <- function(input, output, session) {
 
 
 
-  # Observer for the delete_data button
-  observeEvent(input$delete_data, {
-    data_loaded(FALSE)
-  })
-
-
-
   # Observer to control/grey out retrieve_data button
   observe({
 
@@ -10017,7 +10167,8 @@ server <- function(input, output, session) {
   observeEvent(input$proceed_correction, {
 
     removeModal()
-    multi <- ifelse(input$pre_regression_type == "multi_additive" || input$pre_regression_type == "multi_interactive", TRUE, FALSE)
+    multi <- input$pre_regression_type == "multi_additive" ||
+             input$pre_regression_type == "multi_interactive"
 
     have <- have_datasets()
     have_x <- have$x
@@ -11617,7 +11768,7 @@ server <- function(input, output, session) {
       ## check if the selected data frame is based on daily PM2.5 or PM10 data
       ## if yes, create a barchart that counts the number of days (nob) with a
       ## certain air quality based on the provided breakpoints
-      if (any(TRUE %in% stringr::str_detect(as.character(col_value_txt()), c("pm25", "pm10"))) & input$timestep_size == "days") {
+      if (any(TRUE %in% stringr::str_detect(as.character(col_value_txt()), c("pm25", "pm10"))) & timestep_size(model) != "hours") {
         showNotification("Number of days/hours with AQI will be processed!", type = "message")
 
         ## create the nod barchart for PM2.5 and PM10
@@ -11636,7 +11787,7 @@ server <- function(input, output, session) {
       }
 
       ## Future features: add the nod for ozone!!
-      #} else if (any(TRUE %in% stringr::str_detect(as.character(col_value_txt()), c("ozone"))) & input$timestep_size == "hours") {
+      #} else if (any(TRUE %in% stringr::str_detect(as.character(col_value_txt()), c("ozone"))) & timestep_size(model) == "hours") {
       #  showNotification("Number of days/hours with AQI will be processed!", type = "message")
       #  plot1a <- create_ns_barchart_aqi(df_id())
       #  reactive_barchart_aqi(plot1a)
