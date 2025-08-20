@@ -3422,7 +3422,7 @@ function(object) {
               longitudes <= object@east_bound &
               latitudes >= object@south_bound &
               latitudes <= object@north_bound)
-              row_count <- length(matched_rows)
+      row_count <- length(matched_rows)
 
       if (row_count > 0L) {
         data_frame <- object@purple_air_sites_data_frame[matched_rows, ]

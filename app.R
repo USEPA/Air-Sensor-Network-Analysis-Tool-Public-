@@ -157,6 +157,9 @@ webservice_variable_metadata <- list(
   "PurpleAir.pm25_corrected|ug/m3|Scaled humidity-corrected particulate matter not more than 2.5 microns in diameter.",
   "PurpleAir.humidity|%|Sensor measured relative humidity inside the sensor housing (on average 4% lower than ambient conditions).",
   "PurpleAir.temperature|C|Temperature inside of the sensor housing. On average, this is 4C higher than ambient conditions.",
+  "PurpleAir.indoor_pm25_corrected|ug/m3|Indoor scaled humidity-corrected particulate matter not more than 2.5 microns in diameter.",
+  "PurpleAir.indoor_humidity|%|Indoor sensor measured relative humidity inside the sensor housing (on average 4% lower than ambient conditions).",
+  "PurpleAir.indoor_temperature|C|Indoor temperature inside of the sensor housing. On average, this is 4C higher than ambient conditions.",
   "=== Slow Variables Below ===|-|Retrieving the following variables will be much slower.",
   "PurpleAir.ozone1|ppb|Sensor measured ozone concentration.",
   "PurpleAir.pm1|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, average for channel A and B but excluding downgraded channels and using CF=1 variant for indoor, ATM variant for outdoor devices.",
@@ -685,7 +688,7 @@ ui <- fluidPage(
                   multiple = TRUE, # Allow multiple selections.
                   selectize = FALSE, # Disable search feature.
                   choices = webservice_variables,
-                  size = 24L), # Number of rows shown in the scrollable list.
+                  size = 27L), # Number of rows shown in the scrollable list.
 
       shinyBS::bsTooltip("coverage_menu",
                          paste0("Select one or two variables to retrieve ",

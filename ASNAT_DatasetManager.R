@@ -432,7 +432,10 @@ function(object,
     pre_aggregated_variables <-
       c("PurpleAir.pm25_corrected",
         "PurpleAir.humidity",
-        "PurpleAir.temperature"
+        "PurpleAir.temperature",
+        "PurpleAir.indoor_pm25_corrected",
+        "PurpleAir.indoor_humidity",
+        "PurpleAir.indoor_temperature"
       )
 
     if (coverage %in% pre_aggregated_variables) {
@@ -764,7 +767,6 @@ function(object, start_date, end_date, key) {
         # Sort by id:
 
         result <- result[order(result[, 3L], decreasing = FALSE), ]
-
       } else {
         result <- data.frame()
       }

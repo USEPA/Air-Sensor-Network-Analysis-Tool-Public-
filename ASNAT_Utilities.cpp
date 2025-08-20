@@ -824,7 +824,7 @@ Rcpp::StringVector ASNAT_get_sites_in_bounds_cpp(const double west,
   for (int row = 0; row < match_count; ++row) {
     const int matched_row = matched_rows_0[row];
     const int id = (int) ids_0[matched_row];
-    const Rcpp::String& note(notes[row]);
+    const Rcpp::String& note(notes[matched_row]);
     const char* const c_note = note.get_cstring();
     char buffer[ 80 ] = "";
     snprintf(buffer, sizeof buffer / sizeof *buffer, "%d %s", id, c_note);
