@@ -255,7 +255,7 @@ methods::setValidity("ASNAT_Model", function(object) {
             (#file.exists(object@aqi_statistics_file_name) &&
             nchar(object@aqi_statistics_title) > 0L &&
             nchar(object@aqi_statistics_subtitle) > 0L &&
-            ncol(object@aqi_statistics_data_frame) == 6L))
+            ncol(object@aqi_statistics_data_frame) == 7L))
   return(TRUE)
 })
 
@@ -2808,6 +2808,10 @@ function(object, dataset_x_name, dataset_x_variable,
       y_id_label <- paste0(coverage_source_dataset_y, ".id(-)")
       y_flagged_label <- paste0(coverage_source_dataset_y, ".flagged(-)")
       flagged_y <- data_frame_y[indices_y, flagged_column_y]
+      # Added flagged_x for filtering
+      flagged_column_x <- ASNAT_flagged_column_index(column_names_x)
+      flagged_x <- data_frame_x[indices_x, flagged_column_x]
+
 
       maximum_difference <-
         if (object@apply_maximum_neighbor_value_difference) object@maximum_neighbor_value_difference else
@@ -3000,9 +3004,9 @@ function(object, dataset_x_name, dataset_x_variable,
 
           for (site_y in unique_sites_y) {
             paired_sites_rows <-
-              which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+              which(sites_x == site_x & sites_y == site_y &
+                    flagged_x == "0" & flagged_y == "0" &
                     !is.na(measures_x) & !is.na(measures_y))
-
             n <- length(paired_sites_rows)
 
             if (n > 0L) {
@@ -3053,7 +3057,8 @@ function(object, dataset_x_name, dataset_x_variable,
             # if single variable regression
             if (object@correction_selection == 0L) {
               site_rows <-
-                which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                which(sites_x == site_x & sites_y == site_y &
+                      flagged_y == "0" & flagged_x == "0" &
                       !is.na(measures_x) & !is.na(measures_y))
 
               if (length(site_rows) > 0L) {
@@ -3115,7 +3120,8 @@ function(object, dataset_x_name, dataset_x_variable,
               # object@correction_selection == 2 is interactive
 
               site_rows <-
-                which(sites_x == site_x & sites_y == site_y & flagged_y == "0" &
+                which(sites_x == site_x & sites_y == site_y &
+                      flagged_x == "0" & flagged_y == "0" &
                       !is.na(measures_x) & !is.na(measures_y))
 
               if (length(site_rows) > 0L &&
@@ -3292,7 +3298,8 @@ function(object, dataset_x_name, dataset_x_variable,
           ASNAT_is_aqi_compatible(dataset_x_variable, dataset_y_variable)) {
         object@ok <- FALSE
         unflagged_rows <-
-          which(flagged_y == "0" & !is.na(measures_x) & !is.na(measures_y))
+          which(flagged_x == "0" & flagged_y == "0" &
+                !is.na(measures_x) & !is.na(measures_y))
         unflagged_measures_x <- measures_x[unflagged_rows]
         unflagged_measures_y <- measures_y[unflagged_rows]
         is_hourly <- object@timestep_size == "hours"
@@ -3393,7 +3400,6 @@ function(object, coverage) {
 # Example:
 # sites <- purple_air_sites(asnat_model)
 # print(sites)
-#
 
 ASNAT_declare_method("ASNAT_Model", "purple_air_sites",
 function(object) {
@@ -3443,7 +3449,6 @@ function(object) {
 # Example:
 # sites <- dataset_x_neighbors_id_note(asnat_model, "AQS.pm25")
 # print(sites)
-#
 
 ASNAT_declare_method("ASNAT_Model", "dataset_x_neighbors_id_note",
 function(object, dataset_x_name) {

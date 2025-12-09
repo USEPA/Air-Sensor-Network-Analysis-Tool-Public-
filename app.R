@@ -163,20 +163,20 @@ webservice_variable_metadata <- list(
   "=== Slow Variables Below ===|-|Retrieving the following variables will be much slower.",
   "PurpleAir.ozone1|ppb|Sensor measured ozone concentration.",
   "PurpleAir.pm1|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, average for channel A and B but excluding downgraded channels and using CF=1 variant for indoor, ATM variant for outdoor devices.",
-  "PurpleAir.pm1_a|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel A CF=1 variant for indoor, ATM variant for outdoor devices.'",
-  "PurpleAir.pm1_b|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel B CF=1 variant for indoor, ATM variant for outdoor devices.'",
-  "PurpleAir.pm1_atm|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, ATM variant average for channel A and B but excluding downgraded channels.'",
-  "PurpleAir.pm1_atm_a|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel A ATM variant.'",
-  "PurpleAir.pm1_atm_b|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel B ATM variant.'",
+  "PurpleAir.pm1_a|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel A CF=1 variant for indoor, ATM variant for outdoor devices.",
+  "PurpleAir.pm1_b|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel B CF=1 variant for indoor, ATM variant for outdoor devices.",
+  "PurpleAir.pm1_atm|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, ATM variant average for channel A and B but excluding downgraded channels.",
+  "PurpleAir.pm1_atm_a|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel A ATM variant.",
+  "PurpleAir.pm1_atm_b|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter, channel B ATM variant.",
   "PurpleAir.pm25|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, average for channel A and B but excluding downgraded channels and using CF=1 variant for indoor, ATM variant for outdoor devices.",
-  "PurpleAir.pm25_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel A CF=1 variant for indoor, ATM variant for outdoor devices.'",
-  "PurpleAir.pm25_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel B CF=1 variant for indoor, ATM variant for outdoor devices.'",
-  "PurpleAir.pm25_atm|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, ATM variant average for channel A and B but excluding downgraded channels.'",
-  "PurpleAir.pm25_atm_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel A ATM variant.'",
-  "PurpleAir.pm25_atm_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel B ATM variant.'",
-  "PurpleAir.pm25_cf_1|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, CF=1 variant average for channel A and B but excluding downgraded channels.'",
-  "PurpleAir.pm25_cf_1_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel A CF=1 variant.'",
-  "PurpleAir.pm25_cf_1_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel B CF=1 variant.'",
+  "PurpleAir.pm25_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel A CF=1 variant for indoor, ATM variant for outdoor devices.",
+  "PurpleAir.pm25_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel B CF=1 variant for indoor, ATM variant for outdoor devices.",
+  "PurpleAir.pm25_atm|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, ATM variant average for channel A and B but excluding downgraded channels.",
+  "PurpleAir.pm25_atm_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel A ATM variant.",
+  "PurpleAir.pm25_atm_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel B ATM variant.",
+  "PurpleAir.pm25_cf_1|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, CF=1 variant average for channel A and B but excluding downgraded channels.",
+  "PurpleAir.pm25_cf_1_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel A CF=1 variant.",
+  "PurpleAir.pm25_cf_1_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, channel B CF=1 variant.",
   "PurpleAir.pm25_10minute|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, 10 minute pseudo average using CF=1 data variant for indoor and ATM variant for outdoor, average for channel A and B but excluding downgraded channels.",
   "PurpleAir.pm25_10minute_a|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, 10 minute pseudo average using CF=1 data variant for indoor and ATM variant for outdoor, channel A running average.",
   "PurpleAir.pm25_10minute_b|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter, 10 minute pseudo average using CF=1 data variant for indoor and ATM variant for outdoor, channel B running average.",
@@ -189,9 +189,9 @@ webservice_variable_metadata <- list(
   "PurpleAir.pm10_atm|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, ATM variant average for channel A and B but excluding downgraded channels.",
   "PurpleAir.pm10_atm_a|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, channel A ATM variant.",
   "PurpleAir.pm10_atm_b|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, channel B ATM variant.",
-  "PurpleAir.pm10_cf_1|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, CF=1 variant average for channel A and B but excluding downgraded channels.'",
-  "PurpleAir.pm10_cf_1_a|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, channel A CF=1 variant.'",
-  "PurpleAir.pm10_cf_1_b|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, channel B CF=1 variant.'",
+  "PurpleAir.pm10_cf_1|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, CF=1 variant average for channel A and B but excluding downgraded channels.",
+  "PurpleAir.pm10_cf_1_a|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, channel A CF=1 variant.",
+  "PurpleAir.pm10_cf_1_b|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter, channel B CF=1 variant.",
   "PurpleAir.0_3_um_count|particles/100ml|Count concentration of all particles greater than 0.3 microns in diameter, average particle count for channel A and B but excluding downgraded channels.",
   "PurpleAir.0_3_um_count_a|particles/100ml|Count concentration of all particles greater than 0.3 microns in diameter, channel A.",
   "PurpleAir.0_3_um_count_b|particles/100ml|Count concentration of all particles greater than 0.3 microns in diameter, channel B.",
@@ -3587,16 +3587,10 @@ server <- function(input, output, session) {
 
 
 
-  # Callback for validate_purple_air_key button (a webservice call).
-  # Note this actionButton callback is used instead of a textInput callback for
-  # purple_air_key to avoid multiple webservice calls on incomplete input as
-  # the user slowly types in their key.
-  # BUG in RShiny: testInput callbacks should only get called when the
-  # user hits enter key or the input focus moves out of the textInput
-  # indicating that the user is done typing!
+  # Helper to validate PurpleAir key and update site menu:
 
-  observeEvent(input$validate_purple_air_key, {
-    ASNAT_dprint("In vslidate_purple_air_key callback.\n")
+  validate_purple_air_key_and_sites_menu <- function() {
+    ASNAT_dprint("In vslidate_purple_air_key().\n")
     key <- input$purple_air_key
 
     if (ASNAT_is_conforming_purple_air_key(key)) {
@@ -3618,6 +3612,20 @@ server <- function(input, output, session) {
       ASNAT_warning("Non-conforming PurpleAir Key.")
       # toggleModal(session, "invalidKeyModal", toggle = "toggle")
     }
+  }
+
+
+
+  # Callback for validate_purple_air_key button (a webservice call).
+  # Note this actionButton callback is used instead of a textInput callback for
+  # purple_air_key to avoid multiple webservice calls on incomplete input as
+  # the user slowly types in their key.
+  # BUG in RShiny: testInput callbacks should only get called when the
+  # user hits enter key or the input focus moves out of the textInput
+  # indicating that the user is done typing!
+
+  observeEvent(input$validate_purple_air_key, {
+    validate_purple_air_key_and_sites_menu()
   })
 
 
@@ -4187,10 +4195,10 @@ server <- function(input, output, session) {
     urls <- character(0)
 
     timer <- ASNAT_start_timer()
+    skip_purple_air <- FALSE
 
     for (coverage in coverages) {
       ASNAT_dprint("coverage = %s\n", coverage)
-
 
       # If user selected menu separator line then skip it:
 
@@ -4198,13 +4206,36 @@ server <- function(input, output, session) {
         next
       }
 
-      if (length(grep(fixed = TRUE, "PurpleAir", coverage)) > 0L &&
-          !ASNAT_is_conforming_purple_air_key(purple_air_key(model))) {
-        message_text <-
-          "Skipping PurpleAir retrieval due to non-validated PurpleAir Key."
-        urls <- append(urls, message_text)
-        toggleModal(session, "invalidKeyModal", toggle = "toggle")
-        next
+      # If retrieving PurpleAir, check sites and/or revalidate key:
+
+      is_purple_air <- length(grep(fixed = TRUE, "PurpleAir", coverage)) > 0L
+
+      if (is_purple_air) {
+
+        if (skip_purple_air) {
+          next
+        }
+
+        key <- input$purple_air_key
+        is_conforming_key <- ASNAT_is_conforming_purple_air_key(key)
+
+        if (is_conforming_key) {
+          sites <- purple_air_sites(model)
+
+          if (length(sites) < 2) {
+            validate_purple_air_key_and_sites_menu() # Fallible webservice call.
+          }
+        }
+
+        sites <- purple_air_sites(model) # Re-check sites.
+
+        if (length(sites) < 2) {
+          skip_purple_air <- TRUE # Skip any additional PurpleAir retrievals.
+          message_text <-
+            "Skipping PurpleAir retrievals due to non-validated PurpleAir Key."
+          urls <- append(urls, message_text)
+          next
+        }
       }
 
       model <<- retrieve_data(model, coverage)
@@ -7526,16 +7557,14 @@ server <- function(input, output, session) {
     y_values <- y_values[complete_indices]
 
     n <- length(x_values)
-    err <- x_values - y_values
+    err <- y_values - x_values
     se <- err * err
     mse <- mean(se, na.rm = TRUE)
     rmse <- sqrt(mse)
     mean_x_values <- mean(x_values, na.rm = TRUE)
     nrmse <- rmse / mean_x_values * 100.0
-    abs_x_values <- abs(x_values)
-    non_zero_indices <- which(abs_x_values != 0)
-    # Compute NMBE only on these indices
-    nmbe <- mean(err[non_zero_indices] / abs_x_values[non_zero_indices], na.rm = TRUE) * 100.0
+    mbe <- mean(err, na.rm = TRUE)
+    nmbe <- mbe / mean_x_values * 100.0
     slope <- cov(x_values, y_values) / var(x_values, na.rm = TRUE)
     y_intercept <-
       mean(y_values, na.rm = TRUE) - mean(x_values, na.rm = TRUE) * slope
@@ -7575,23 +7604,25 @@ server <- function(input, output, session) {
                       "R2: %0.2f\n",
                       "RMSE: %0.2f\n",
                       "NRMSE: %0.2f%%\n",
+                      "MBE: %0.2f%%\n",
                       "NMBE: %0.2f%%"),
-              n, slope, y_intercept, r_squared, rmse, nrmse, nmbe)
+              n, slope, y_intercept, r_squared, rmse, nrmse, mbe, nmbe)
     } else {
       label <-
         sprintf(paste0("N: %d\n",
                       "R2: %0.2f\n",
                       "RMSE: %0.2f\n",
                       "NRMSE: %0.2f%%\n",
+                      "MBE: %0.2f%%\n",
                       "NMBE: %0.2f%%"),
-              n, r_squared, rmse, nrmse, nmbe)
+              n, r_squared, rmse, nrmse, mbe, nmbe)
 
     }
 
     result <- list(label = label,
                    n = n, slope = slope, y_intercept = y_intercept,
                    r_squared = r_squared, rmse = rmse, nrmse = nrmse,
-                   nmbe = nmbe)
+                   mbe = mbe, nmbe = nmbe)
     return(result)
   }
 
@@ -7614,7 +7645,7 @@ server <- function(input, output, session) {
     y_range <- y_maximum - y_minimum
     text_line_height <- y_range * 0.05
     stats_label_x <- x_minimum
-    stats_label_y <- y_minimum + y_range * 0.6
+    stats_label_y <- y_minimum + y_range * 0.55
     yx_line_label_x <- stats_label_x
     yx_line_label_y <- stats_label_y - text_line_height
     yx_line_label <- "_____ is line y = x"
@@ -7681,7 +7712,7 @@ server <- function(input, output, session) {
     x_range <- x_maximum - x_minimum
     y_range <- y_maximum - y_minimum
     stats_label_x <- x_minimum + x_range * 0.12
-    stats_label_y <- y_minimum + y_range * 0.6
+    stats_label_y <- y_minimum + y_range * 0.8
     stats <- compute_scatterplot_stats(x_values, y_values, TRUE,
                                        type = regression_linear,
                                        r_squared_given = r_squared)
@@ -10987,7 +11018,7 @@ server <- function(input, output, session) {
 
     display_equation <- list()
 
-    for (i in seq_along(selected_data)) {
+    for (i in seq_len(nrow(selected_data))) {
       record <- selected_data[i, ]
       id <- record[[1]]
       x_id <- record[[6]]
@@ -11899,9 +11930,15 @@ server <- function(input, output, session) {
 
       ## store the time variation plot in reactive value for the download
       reactive_time_variation(plot5)
-
       ## show the time variation plot in ui
-      output$orig_timevar_plot <- renderPlot({plot5})
+      if (input$timestep_size == "hours") {
+        output$orig_timevar_plot <- renderPlot({plot5})
+      } else {
+        output$orig_timevar_plot <- renderPlot({
+          grid::grid.draw(reactive_time_variation())
+        })
+      }
+
       hide(id = "loading-orig_timevar_plot", anim = TRUE, animType = "fade")
       show("app-content")
     }
@@ -11990,9 +12027,20 @@ server <- function(input, output, session) {
 
       ## time variation plot using openair library see Carslaw et al. (xxxx) Fig. 4
       if (!is.null(reactive_time_variation())) {
-        png(filename = "timevariation.png", width = 8, height = 6, units = "in", res = 300)
-        print(reactive_time_variation())
-        dev.off()
+
+
+        if (input$timestep_size == "hours") {
+          png(filename = "timevariation.png", width = 8, height = 6, units = "in", res = 300)
+          print(reactive_time_variation())
+          dev.off()
+        } else {
+          ragg::agg_png("timevariation.png", width = 2400, height = 1200, res = 200)
+          on.exit(dev.off(), add = TRUE)
+          grid::grid.newpage()
+          obj <- reactive_time_variation()
+          grid::grid.draw(obj)
+        }
+
         plot_list <- c(plot_list, "timevariation.png")
       }
 
@@ -13030,10 +13078,25 @@ server <- function(input, output, session) {
 
     append_message("Process plot!")
 
-    ## create time variation plot based on the merged data frame using the openair library
-    plot <- openair::timeVariation(merged_df, pollutant = c(dfn1, dfn2), ylab = NULL)
+    if (input$timestep_size != "hours") {
+      ## create time variation plot based on the merged data frame using the openair library
+      plot_temp <- openair::timeVariation(merged_df, pollutant = c(dfn1, dfn2), ylab = NULL, plot = FALSE)
 
-    return(plot)
+      plot(plot_temp, subset = "month")
+      p_month <- lattice::trellis.last.object()
+
+      plot(plot_temp, subset = "day")
+      p_day <- lattice::trellis.last.object()
+
+      # return the grob
+      g <- gridExtra::arrangeGrob(p_month, p_day, ncol = 2)
+
+    } else {
+      plot <- openair::timeVariation(merged_df, pollutant = c(dfn1, dfn2), ylab = NULL)
+      return(plot)
+    }
+
+    return(g)
   }
 
 

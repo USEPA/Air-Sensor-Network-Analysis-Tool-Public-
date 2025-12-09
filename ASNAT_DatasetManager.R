@@ -450,15 +450,15 @@ function(object,
       sensor_tag <- paste0("_sensor_", purple_air_sensor)
     }
 
-    options <- paste0(
-      aggregate_option,
-      "&KEY=",
-      purple_air_key,
-      sensor_option,
-      "&OUT_IN_FLAG=0",
-      "&MAXIMUM_DIFFERENCE=5",
-      "&MAXIMUM_RATIO=0.7",
-      "&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75")
+    options <- paste0(aggregate_option, "&KEY=", purple_air_key, sensor_option)
+
+    if (aggregate_option != "") {
+      options <- paste0(options,
+                        "&OUT_IN_FLAG=0",
+                        "&MAXIMUM_DIFFERENCE=5",
+                        "&MAXIMUM_RATIO=0.7",
+                        "&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75")
+    }
   } else if (length(grep(fixed = TRUE, "AQS", coverage))) {
     options <- "&FILTER_MISSING=1"
 

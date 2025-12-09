@@ -1493,6 +1493,7 @@ function(variable, is_hourly, measures_x, measures_y) {
                        N = rep(0, aqi_categories),
                        NMBE = rep(0, aqi_categories),
                        RMSE = rep(0, aqi_categories),
+                       MSE = rep(0, aqi_categories),
                        NRMSE = rep(0, aqi_categories))
 
   aqi_indices_x <- ASNAT_aqi_indices(variable, is_hourly, measures_x)
@@ -1504,30 +1505,34 @@ function(variable, is_hourly, measures_x, measures_y) {
     if (n > 0L) {
       aqi_measures_x <- measures_x[aqi_indices]
       aqi_measures_y <- measures_y[aqi_indices]
-      err <- aqi_measures_x - aqi_measures_y
+      err <- aqi_measures_y - aqi_measures_x
       se <- err * err
       mse <- mean(se, na.rm = TRUE)
       rmse <- sqrt(mse)
       mean_x_values <- mean(aqi_measures_x, na.rm = TRUE)
       nrmse <- rmse / mean_x_values * 100.0
       abs_x_values <- abs(aqi_measures_x)
-      nmbe <- mean(err / abs_x_values, na.rm = TRUE) * 100.0
+      mbe <- mean(err, na.rm = TRUE)
+      nmbe <- mbe / mean_x_values * 100.0
       aqi_name <- ASNAT_aqi_names[[aqi_category]]
       breakpoint <- aqi_breakpoints[[aqi_category]]
-      result[aqi_category, ] <- c(aqi_name, breakpoint, n, nmbe, rmse, nrmse)
+      result[aqi_category, ] <-
+        c(aqi_name, breakpoint, n, mbe, nmbe, rmse, nrmse)
     }
   }
 
   parts <- unlist(strsplit(variable, "[()]"))
   units <- parts[[2L]]
   column2 <- sprintf("Upper_Limit(%s)", units)
+  column4 <- sprintf("MBE(%s)", units)
   column5 <- sprintf("RMSE(%s)", units)
   colnames(result) <-
-    c("AQI_Category(-)", column2, "Count(-)", "NMBE(%)", column5, "NRMSE(%)")
+    c("AQI_Category(-)", column2, "Count(-)", column4, "NMBE(%)",
+      column5, "NRMSE(%)")
 
   # Ensure the non-string columns are integer or numeric:
 
-  for (the_column in 2L:6L) {
+  for (the_column in 2L:7L) {
     the_values <- result[[the_column]]
 
     if (the_column == 3L) {
@@ -2364,19 +2369,22 @@ function(object, data_frame, selected_flag_variable,
         data_frame[station_rows, selected_flag_variable, drop = FALSE]
 
       # Ensure window size is smaller than the number of records for this station
-      if (length(station_rows) >= hampel_filter_threshold) {
+      if (length(station_rows) >= as.integer(hampel_filter_window)) {
         # Apply the Hampel filter to the selected variable for this station
-        outlier_indices <- c()  # Default value if there's an error
-        outliers <-
-          try(seismicRoll::findOutliers(station_data[[selected_flag_variable]],
-                                        n = 5,
-                                        thresholdMin = 1),
-              silent = TRUE)
+        outlier_indices <- integer(0)  # Default value if there's an error
+        scores <-
+          try(seismicRoll::roll_hampel(
+                as.numeric(station_data[[selected_flag_variable]]),
+                n = as.integer(hampel_filter_window)), silent = TRUE)
+
 
         # Check if there was an error
-        if (!inherits(outliers, "try-error")) {
-          # Map the outlier indices from the station subset back to the full dataset indices
-          outlier_indices <- station_rows[outliers]
+        if (!inherits(scores, "try-error")) {
+          local_idx <- which(!is.na(scores) &
+                            scores > as.numeric(hampel_filter_threshold))
+          if (length(local_idx)) {
+            outlier_indices <- station_rows[local_idx]
+          }
         }
 
         if (length(outlier_indices) > 0) {
