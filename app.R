@@ -1212,11 +1212,13 @@ ui <- fluidPage(
                                     "(or Dataset X if Dataset Y is none)."),
                                     options = tooltip_options),
 
-                 actionButton("clear_flagging", label = "Clear Flagging"),
-
-                 shinyBS::bsTooltip("clear_flagging",
-                                    paste0("Clear all current flaggings."),
+                 actionButton("refresh_flagging", label = "Refresh Table Using Settings Below"),
+                 shinyBS::bsTooltip("refresh_flagging",
+                                    paste0("Refresh the flagging table to reflect ",
+                                         "changes from the preset flag check boxes below."),
                                     options = tooltip_options),
+
+
 
                  h1(),
 
@@ -1229,13 +1231,13 @@ ui <- fluidPage(
                                            "<save-directory>/flags.txt."),
                                     options = tooltip_options),
 
-                 actionButton("refresh_flagging", label = "Refresh Table Using Settings Below"),
-                 shinyBS::bsTooltip("refresh_flagging",
-                                    paste0("Refresh the flagging table to reflect ",
-                                         "changes from the preset flag check boxes below."),
+                 actionButton("clear_flagging", label = "Clear Flagging"),
+
+                 shinyBS::bsTooltip("clear_flagging",
+                                    paste0("Clear all current flaggings."),
                                     options = tooltip_options),
-                 br(),
-                 br(),
+
+                 h1(),
 
                  tabsetPanel(
                   tabPanel("Dataset Y Neighbor Flagging",
@@ -1630,7 +1632,24 @@ ui <- fluidPage(
                     )
                   )
 
-                 ) #tabsetPanel(
+                 ), #tabsetPanel(
+
+
+                 # export and import flag presets
+                 br(),
+                 if (!ASNAT_is_remote_hosted) actionButton("export_flagging_preset", label = "Export Flag Presets") else
+                 downloadButton(outputId = "download_flagging_preset",
+                                label = "Export Flag Presets"),
+
+                 shinyBS::bsTooltip("export_flagging_preset",
+                                    paste0("Save flag presets to file ",
+                                           "<save-directory>/flag_presets.txt."),
+                                    options = tooltip_options),
+                fileInput("import_flagging_preset", "Import Flag Presets", accept = c(".txt")),
+                shinyBS::bsTooltip("import_flagging_preset",
+                                   "Load flag presets from a text file.",
+                                   options = tooltip_options),
+
 
         ), #flagging tab
 
@@ -1830,6 +1849,12 @@ ui <- fluidPage(
                         # selectInput("regression_type", "Select Regression Type",
                         #             choices = c("Linear", "Polynomial", "Exponential", "Logarithmic", "Power")),
                         actionButton("generate_coefficients", "Generate Coefficients", class = "btn btn-primary"),
+                        actionButton("generate_group_coefficient", "Generate Group Coefficients", class = "btn btn-primary", style = "margin-left: 8px;"),
+                        shinyBS::bsTooltip("generate_group_coefficient",
+                                          "Fit one equation using all selected rows",
+                                          options = tooltip_options),
+
+
 
                         br(),
 
@@ -1885,7 +1910,7 @@ ui <- fluidPage(
                         br(),
 
                         plotlyOutput("interactive_original_scatter_plot"),
-                        tableOutput("table6"),
+                        DT::DTOutput("table6"),
                       ) # end tabpanel
 
                     # comment out custom equation for now
@@ -5527,6 +5552,326 @@ server <- function(input, output, session) {
     # Remove the "in progress" notification
     removeNotification("clear_flags_popup")
   })
+
+  # Function to generate a text summary of the flag presets
+  generate_session_flag_summary <- function(model) {
+    details <- character(0)
+
+    # flag 60
+    if (apply_negtive_value_flag(model)) details <- c(details, "Flag 60  # Flags invalid negative values in pollutant measurements (O3, NO2, CO, etc.)")
+    # flag 65
+    if (apply_date_validation_flag(model)) {
+      details <- c(details, "Flag 65  # Flags temporal inconsistencies (e.g., end timestamps before start timestamps).")
+    }
+
+    # flag 70
+    if (apply_sudden_spike_flag(model)) {
+      w <- spike_time_window(model)
+      t <- spike_threshold(model)
+      details <- c(details, sprintf("Flag 70 - Sudden spike: window = %s, percent increase threshold = %s  # Flags sudden spikes in pollutant levels.", w, t))
+    }
+
+    # flag 71
+    if (apply_sudden_drop_flag(model)) {
+      w <- drop_time_window(model)
+      t <- drop_threshold(model)
+      details <- c(details, sprintf("Flag 71 - Sudden drop: window = %s, percent decrease threshold = %s  # Flags sudden drops in pollutant levels.", w, t))
+    }
+
+    # flag 72
+    if (apply_daily_pattern_o3(model)) details <- c(details, "Flag 72  # Flags ozone measurements that deviate from typical daily patterns.")
+    # flag 73
+    if (apply_daily_pattern_pm(model)) details <- c(details, "Flag 73  # Flags PM measurements that deviate from typical daily patterns.")
+
+    # flag 80
+    if (apply_maximum_neighbor_value_difference(model)) {
+      thr <- maximum_neighbor_value_difference(model)
+      details <- c(details, sprintf("Flag 80 - Maximum neighbor value difference: threshold = %s  # Flags data points where the absolute difference between Dataset X and Y exceeds a specified threshold.", thr))
+    }
+
+    # flag 81
+    if (apply_maximum_neighbor_value_percent_difference(model)) {
+      thr <- maximum_neighbor_value_percent_difference(model)
+      details <- c(details, sprintf("Flag 81 - Maximum neighbor value percent difference: threshold = %s%%  # Flags data points where the percent difference between Dataset X and Y exceeds a specified threshold.", thr))
+    }
+
+    # flag 82
+    if (apply_minimum_neighbor_value_r_squared(model)) {
+      thr <- minimum_neighbor_value_r_squared(model)
+      details <- c(details, sprintf("Flag 82 - Minimum neighbor value R-squared: threshold = %s  # Flags data points where the R-squared value between Dataset X and Y is below a specified threshold.", thr))
+    }
+
+    # flag 83
+    if (apply_constant_value_flag(model)) {
+      thr <- constant_value_threshold(model)
+      details <- c(details, sprintf("Flag 83 - Number of consecutive measurements: threshold = %s  # Flags data points where values remain constant for more than a specified number of consecutive measurements.", thr))
+    }
+
+    # flag 84
+    if (apply_long_missing_flag(model)) {
+      thr <- long_missing_threshold(model)
+      details <- c(details, sprintf("Flag 84 - Number of consecutive timesteps: threshold = %s  # Flags data points where data is missing for more than a specified number of consecutive timesteps.", thr))
+    }
+
+    # flag 85
+    if (apply_outlier_stat_flag(model)) {
+      thr <- outlier_threshold(model)
+      tw <- outlier_time_window(model)
+      start <- outlier_start_timestamps(model)
+      end <- outlier_end_timestamps(model)
+      win <- if (isTRUE(tw) && !is.null(start) && nchar(start) > 0 && !is.null(end) && nchar(end) > 0)
+        sprintf(" within [%s, %s]", start, end) else ""
+      details <- c(details, sprintf("Flag 85 - Statistical outlier: threshold = %s %s  # Flags data points whose distance from the mean is greater than the specified threshold (in standard deviation units).", thr, win))
+    }
+
+    # flag 86
+    if (apply_hampel_filter_flag(model)) {
+      w <- hampel_filter_window(model)
+      t <- hampel_filter_threshold(model)
+      details <- c(details, sprintf("Flag 86 - Hampel filter outliers: window = %s, threshold = %s  # Flags outliers identified by the Hampel filter method.", w, t))
+    }
+
+    # flag 90
+    if (apply_redundancy_check_flag(model)) details <- c(details, "Flag 90  # Flags duplicate measurements at the same location and timestamp.")
+    # flag 95
+    if (apply_format_check_flag(model)) details <- c(details, "Flag 95  # Flags timestamps that don't conform to ISO 8601 format (YYYY-MM-DDTHH:MM:SS-ZZZZ).")
+
+
+    if (length(details) == 0L) character(0) else c("# Preset flags enabled this session:  #  \n", details)
+  }
+
+
+  # Function to apply flags from a text summary file
+  apply_flags_from_summary_file <- function(model, file_path) {
+    if (!file.exists(file_path)) stop("File not found: ", file_path)
+
+    lines <- readLines(file_path)
+
+    # Function to extract a numeric value from a line
+    extract_numeric <- function(line, pattern) {
+      re <- regexpr(pattern, line, perl = TRUE)
+      if (re != -1) {
+        match_str <- regmatches(line, re)
+        val_str <- gsub("[^0-9.\\-]", "", match_str)
+        return(as.numeric(val_str))
+      }
+      return(NA_real_)
+    }
+
+    # Function to extract two numeric values from a line
+    extract_two_numerics <- function(line, p1, p2) {
+      list(extract_numeric(line, p1), extract_numeric(line, p2))
+    }
+
+    # Apply flags from the text summary file
+    for (line in lines) {
+      line <- trimws(line)
+      if (!startsWith(line, "Flag")) next
+
+      if (grepl("Flag 60", line)) {
+        apply_negtive_value_flag(model) <<- TRUE
+      } else if (grepl("Flag 65", line)) {
+        apply_date_validation_flag(model) <<- TRUE
+      } else if (grepl("Flag 72", line)) {
+        apply_daily_pattern_o3(model) <<- TRUE
+      } else if (grepl("Flag 73", line)) {
+        apply_daily_pattern_pm(model) <<- TRUE
+      } else if (grepl("Flag 90", line)) {
+        apply_redundancy_check_flag(model) <<- TRUE
+      } else if (grepl("Flag 95", line)) {
+        apply_format_check_flag(model) <<- TRUE
+      } else if (grepl("Flag 70", line)) {
+        apply_sudden_spike_flag(model) <<- TRUE
+        vals <- extract_two_numerics(line, "window = [0-9.]+", "threshold = [0-9.]+")
+        if (!is.na(vals[[1]])) spike_time_window(model) <<- as.integer(vals[[1]])
+        if (!is.na(vals[[2]])) spike_threshold(model) <<- vals[[2]]
+      } else if (grepl("Flag 71", line)) {
+        apply_sudden_drop_flag(model) <<- TRUE
+        vals <- extract_two_numerics(line, "window = [0-9.]+", "threshold = [0-9.]+")
+        if (!is.na(vals[[1]])) drop_time_window(model) <<- as.integer(vals[[1]])
+        if (!is.na(vals[[2]])) drop_threshold(model) <<- vals[[2]]
+      } else if (grepl("Flag 80", line)) {
+        apply_max_neighbor_value_diff(model) <<- TRUE
+        val <- extract_numeric(line, "threshold = [0-9.]+")
+        if (!is.na(val)) max_neighbor_value_diff(model) <<- val
+      } else if (grepl("Flag 81", line)) {
+        apply_max_neighbor_val_pdiff(model) <<- TRUE
+        val <- extract_numeric(line, "threshold = [0-9.]+%")
+        if (!is.na(val)) max_neighbor_value_pdiff(model) <<- val
+      } else if (grepl("Flag 82", line)) {
+        apply_min_neighbor_value_r2(model) <<- TRUE
+        val <- extract_numeric(line, "threshold = [0-9.]+")
+        if (!is.na(val)) {
+          if (val < 0 || val > 1) {
+            stop(sprintf("Import error: Flag 82 (Minimum neighbor value R-squared) requires 0–1, got %s. Line: %s",
+                        val, line), call. = FALSE)
+          }
+          tryCatch({
+            min_neighbor_value_r2(model) <<- val
+          }, error = function(e) {
+            stop(sprintf("Import error: failed to set Flag 82 (R-squared). Value: %s. Line: %s. Details: %s",
+                        val, line, e$message), call. = FALSE)
+          })
+        }
+      } else if (grepl("Flag 83", line)) {
+        apply_constant_value_flag(model) <<- TRUE
+        val <- extract_numeric(line, "threshold = [0-9.]+")
+        if (!is.na(val)) constant_value_threshold(model) <<- as.integer(val)
+      } else if (grepl("Flag 84", line)) {
+        apply_long_missing_flag(model) <<- TRUE
+        val <- extract_numeric(line, "threshold = [0-9.]+")
+        if (!is.na(val)) long_missing_threshold(model) <<- as.integer(val)
+    } else if (grepl("Flag 85", line)) {
+      apply_outlier_stat_flag(model) <<- TRUE
+
+      # threshold (integer)
+      val <- extract_numeric(line, "threshold = [0-9.]+")
+      if (!is.na(val)) outlier_threshold(model) <<- as.integer(val)
+
+      # optional time window: within [YYYY-MM-DDTHH:MM:SS-0000, YYYY-MM-DDTHH:MM:SS-0000]
+      m <- regexpr("within\\s*\\[[^\\]]+\\]", line, perl = TRUE)
+      if (m != -1) {
+        range_str <- regmatches(line, m)
+        inside <- gsub("^within\\s*\\[\\s*|\\s*\\]$", "", range_str)
+        parts <- strsplit(inside, "\\s*,\\s*")[[1]]
+
+        if (length(parts) != 2L) {
+          stop(sprintf("Import error: Flag 85 window malformed. Expected 'within [start, end]'. Line: %s", line), call. = FALSE)
+        }
+
+        start <- parts[1]
+        end <- parts[2]
+        ts_pat <- "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}-\\d{4}$"
+        if (!grepl(ts_pat, start) || !grepl(ts_pat, end)) {
+          stop(sprintf("Import error: Flag 85 window must use YYYY-MM-DDTHH:MM:SS-0000. Got [%s, %s]. Line: %s",
+                      start, end, line), call. = FALSE)
+        }
+
+        outlier_time_window(model) <<- TRUE
+        outlier_start_timestamps(model) <<- start
+        outlier_end_timestamps(model) <<- end
+      } else {
+        outlier_time_window(model) <<- FALSE
+        outlier_start_timestamps(model) <<- ""
+        outlier_end_timestamps(model) <<- ""
+      }
+    } else if (grepl("Flag 86", line)) {
+        apply_hampel_filter_flag(model) <<- TRUE
+        vals <- extract_two_numerics(line, "window = [0-9.]+", "threshold = [0-9.]+")
+        if (!is.na(vals[[1]])) hampel_filter_window(model) <<- as.integer(vals[[1]])
+        if (!is.na(vals[[2]])) hampel_filter_threshold(model) <<- as.integer(vals[[2]])
+      }
+    }
+    return(model)
+  }
+
+  # Callback for Save Flag presets button - when not remote hosted:
+  observeEvent(input$export_flagging_preset, {
+
+    summary <- generate_session_flag_summary(model)
+    have_flag_presets <- length(summary) > 0L
+
+    if (have_flag_presets) {
+      check_set_reset_output_directory()
+      flags_preset_file_name <- paste0(output_directory(model), "/flag_presets.txt")
+      cat(sep = "\n", file = flags_preset_file_name, summary)
+      append_message(flags_preset_file_name)
+    }
+  })
+
+  # Callback for Import Flag presets button:
+  observeEvent(input$import_flagging_preset, {
+    file <- input$import_flagging_preset
+    if (is.null(file)) {
+      return(NULL)
+    }
+
+    tryCatch({
+      apply_flags_from_summary_file(model, file$datapath)
+
+      # Flag 60 - Negative values
+      updateCheckboxInput(session, "apply_invalid_negtive_value", value = apply_negtive_value_flag(model))
+      # Flag 65 - Date validation
+      updateCheckboxInput(session, "date_validation", value = apply_date_validation_flag(model))
+
+      # Flag 70 - Sudden spike
+      updateCheckboxInput(session, "apply_sudden_spike", value = apply_sudden_spike_flag(model))
+      updateNumericInput(session, "spike_time_window", value = spike_time_window(model))
+      updateNumericInput(session, "spike_threshold", value = spike_threshold(model))
+
+      # Flag 71 - Sudden drop
+      updateCheckboxInput(session, "apply_sudden_drop", value = apply_sudden_drop_flag(model))
+      updateNumericInput(session, "drop_time_window", value = drop_time_window(model))
+      updateNumericInput(session, "drop_threshold", value = drop_threshold(model))
+
+      # Flag 72 - Daily pattern O3
+      updateCheckboxInput(session, "apply_daily_pattern_o3", value = apply_daily_pattern_o3(model))
+      # Flag 73 - Daily pattern PM
+      updateCheckboxInput(session, "apply_daily_pattern_pm", value = apply_daily_pattern_pm(model))
+
+      # Flag 80 - Maximum neighbor value difference
+      updateCheckboxInput(session, "apply_difference", value = apply_maximum_neighbor_value_difference(model))
+      updateNumericInput(session, "maximum_neighbor_value_difference", value = maximum_neighbor_value_difference(model))
+
+      # Flag 81 - Percent difference
+      updateCheckboxInput(session, "apply_percent_difference", value = apply_maximum_neighbor_value_percent_difference(model))
+      updateNumericInput(session, "maximum_neighbor_value_percent_difference", value = maximum_neighbor_value_percent_difference(model))
+
+      # Flag 82 - Minimum neighbor value R-squared
+      updateCheckboxInput(session, "apply_r_squared", value = apply_minimum_neighbor_value_r_squared(model))
+      updateNumericInput(session, "minimum_neighbor_value_r_squared", value = minimum_neighbor_value_r_squared(model))
+
+      # Flag 83 - Constant value
+      updateCheckboxInput(session, "apply_constant_value", value = apply_constant_value_flag(model))
+      updateNumericInput(session, "constant_value_threshold", value = constant_value_threshold(model))
+
+      # Flag 84 - Long missing
+      updateCheckboxInput(session, "apply_long_missing", value = apply_long_missing_flag(model))
+      updateNumericInput(session, "long_missing_threshold", value = long_missing_threshold(model))
+
+      # Flag 85 - Statistical outlier
+      updateCheckboxInput(session, "apply_outlier_stat", value = apply_outlier_stat_flag(model))
+      updateNumericInput(session, "outlier_threshold", value = outlier_threshold(model))
+      updateCheckboxInput(session, "use_time_window", value = outlier_time_window(model))
+      updateTextInput(session, "outlier_start_timestamps", value = outlier_start_timestamps(model))
+      updateTextInput(session, "outlier_end_timestamps", value = outlier_end_timestamps(model))
+
+      # Flag 86 - Hampel filter
+      updateCheckboxInput(session, "apply_hampel_filter", value = apply_hampel_filter_flag(model))
+      updateNumericInput(session, "hampel_filter_window", value = hampel_filter_window(model))
+      updateNumericInput(session, "hampel_filter_threshold", value = hampel_filter_threshold(model))
+
+      # Flag 90 - Redundancy check
+      updateCheckboxInput(session, "apply_redundancy_check", value = apply_redundancy_check_flag(model))
+      # Flag 95 - Format check
+      updateCheckboxInput(session, "apply_format_check", value = apply_format_check_flag(model))
+
+      append_message(paste("Loaded flag presets from", file$name))
+
+    }, error = function(e) {
+      append_message(paste("Error loading flag presets:", e$message))
+    })
+  })
+
+
+  # Callback for Download Flag Presets button - when remote-hosted:
+  output$download_flagging_preset <- downloadHandler(
+    filename = "flag_presets.txt",
+    content = function(file) {
+      summary <- generate_session_flag_summary(model)
+      have_flag_presets <- length(summary) > 0L
+
+      if (have_flag_presets) {
+        check_set_reset_output_directory()
+        flags_preset_file_name <- paste0(output_directory(model), "/flag_presets.txt")
+        cat(sep = "\n", file = flags_preset_file_name, summary)
+        append_message(flags_preset_file_name)
+        file.copy(from = flags_preset_file_name, to = file, overwrite = TRUE)
+      }
+    },
+    contentType = "text/plain"
+  )
+
 
 
 
@@ -10232,6 +10577,7 @@ server <- function(input, output, session) {
 
     # Hide or show existing tables and plots
     if (nrow(comparison_r2_df) == 0) {
+      showNotification("No matching data found. Consider adjusting your flagging options (e.g., uncheck some flag conditions).", type = "warning", duration = 8)
       shinyjs::hide("data_correction_regression_layout")
       return(NULL)
     }
@@ -10240,7 +10586,7 @@ server <- function(input, output, session) {
     station_pairs <- summary_y[, c("Site_Id(-)", "Nearest_Y_Site(-)")]
 
     # Create a logical vector for matching pairs
-    matched_pairs <- sapply(seq_along(comparison_r2_df), function(i) {
+    matched_pairs <- sapply(seq_len(nrow(comparison_r2_df)), function(i) {
       x_id <- comparison_r2_df[i, 1]  # Using column index 4 instead of name
       y_id <- comparison_r2_df[i, 4]  # Using column index 1 instead of name
 
@@ -10493,10 +10839,15 @@ server <- function(input, output, session) {
     req(selected_device())
 
     # Convert the selected device ID to an integer
-    device_id <- as.integer(selected_device())
+    # device_id <- as.integer(selected_device())
+    device_id <- selected_device()
+
     # Retrieve the data for the selected device from the correction dictionary
     device_data <- correction_dictionary(model)[[device_id]]
-
+    if (is.null(device_data)) {
+      device_id <- as.integer(selected_device())
+      device_data <- correction_dictionary(model)[[device_id]]
+    }
     # Extract x values (original data) and y values (corrected data)
     x_values <- device_data$filtered_data_y[[device_data$independent_vars]]
     y_values <- device_data$calculated_values
@@ -10535,9 +10886,14 @@ server <- function(input, output, session) {
     req(selected_device())
 
     # Convert the selected device ID to an integer
-    device_id <- as.integer(selected_device())
+    device_id <- selected_device()
     # Retrieve the data for the selected device from the correction dictionary
     device_data <- correction_dictionary(model)[[device_id]]
+
+    if (is.null(device_data)) {
+      device_id <- as.integer(selected_device())
+      device_data <- correction_dictionary(model)[[device_id]]
+    }
     # Extract x and y values from the device data
     x_values <- device_data$filtered_data_y[[device_data$independent_vars]]
     y_values <- device_data$filtered_data_y[[device_data$dependent_var]]
@@ -10647,24 +11003,40 @@ server <- function(input, output, session) {
 
 
 
-  # Update table6 with corrected data
-  output$table6 <- renderTable({
-    # Ensure a device is selected before proceeding
+  # Update table6(correction table) with corrected data
+  output$table6 <- DT::renderDT({
     req(selected_device())
 
-    # Convert the selected device ID to an integer
-    device_id <- as.integer(selected_device())
-
-    # Retrieve the data for the selected device from the correction dictionary
+    device_id <- selected_device()
     device_data <- correction_dictionary(model)[[device_id]]
-    corrected_column_name <-
-      gsub(fixed = TRUE, "(", "_corrected(", device_data$dependent_var)
+
+    # Convert the selected device ID to an integer
+    if (is.null(device_data)) {
+      device_id <- as.integer(selected_device())
+      device_data <- correction_dictionary(model)[[device_id]]
+    }
+
+    corrected_column_name <- gsub(fixed = TRUE, "(", "_corrected(", device_data$dependent_var)
 
     corrected_df <- device_data$filtered_data_y
     corrected_df[[corrected_column_name]] <- device_data$calculated_values
     # Extract x values (original data) and y values (corrected data)
-    corrected_df
-  })
+
+    DT::datatable(
+      corrected_df,
+      rownames = FALSE,
+      filter = "top",
+      options = list(
+        pageLength = 25,
+        lengthMenu = c(10, 25, 50, 100),
+        paging = TRUE,
+        searching = TRUE,
+        autoWidth = TRUE,
+        scrollX = TRUE,
+        searchHighlight = TRUE
+      )
+    )
+  }, server = TRUE)
 
 
 
@@ -10990,7 +11362,6 @@ server <- function(input, output, session) {
   # Generate coefficients for the selected data entries
   observeEvent(input$generate_coefficients, {
 
-
     # 2. Check if rows are selected in the Neighboring Points table
     selected_rows <- input$selectable_correction_table_rows_selected
 
@@ -11041,7 +11412,6 @@ server <- function(input, output, session) {
         )
         next  # Skip to the next iteration
       }
-
 
       # # Ensure that the dependent variable is from dataset Y and independents from X
       dependent_var <- paste0(dataset_y_name, ".", input$dataset_y_variable_menu)
@@ -11380,7 +11750,7 @@ server <- function(input, output, session) {
     all_devices_data <- list()
 
     # Process each selected equation (device)
-    for (i in seq_along(selected_equations)) {
+    for (i in seq_len(nrow(selected_equations))) {
       device_id <- selected_equations$Device_ID[i]
 
       device_data <- corrected_data[[device_id]]
@@ -11421,6 +11791,378 @@ server <- function(input, output, session) {
     showNotification(paste("Data exported to", filename), type = "message")
   })
 
+
+
+  # # Generate coefficients for the selected data entries
+  observeEvent(input$generate_group_coefficient, {
+
+    # 2. Check if rows are selected in the Neighboring Points table
+    selected_rows <- input$selectable_correction_table_rows_selected
+
+    if (length(selected_rows) == 0) {
+      showNotification("Please select rows from the Neighboring Points table.", type = "warning")
+      return()
+    }
+
+
+    # 3. Get the selected data and extract dataset names and IDs
+    selected_data <- filtered_comparison_df()[selected_rows, ]
+    # timestamp(UTC) AirNow.id(-) AirNow.pm25(ug/m3) AQS.id(-) AQS.pm25(ug/m3) AQS.flagged(-) AQS.temperature(C)
+    # full_data[3] is x measurements
+    # full_data[5] is y measurements
+    # full_data[7] is z measurements
+    full_data <- comparison_data_frame(model)
+
+    dataset_x_name <- sub("\\..*", "", input$dataset_x_menu[1L])
+    dataset_y_name <- sub("\\..*", "", input$dataset_y_menu[1L])
+
+    id_column_x <- paste0(dataset_x_name, ".id(-)")
+    id_column_y <- paste0(dataset_y_name, ".id(-)")
+
+    # 4. Retrieve full datasets and filter based on selected IDs
+    selected_y_ids <- selected_data[[1]]
+    selected_x_ids <- selected_data[[6]]
+    filtered_full_data <- full_data[
+      full_data[[id_column_y]] %in% selected_y_ids &
+      full_data[[id_column_x]] %in% selected_x_ids,
+    ]
+    display_equation <- list()
+
+    site_measures_x <- filtered_full_data[[3]]
+    site_measures_y <- filtered_full_data[[5]]
+    # site_measures_z <- filtered_full_data[[7]]
+
+    # check size based on the regression type
+    min_size <- switch(input$regression_type,
+                      "Linear" = 20,
+                      "Quadratic" = 30,
+                      "Cubic" = 40,
+                      15)
+
+    if (nrow(filtered_full_data) < min_size) {
+      showNotification(
+        paste0("Warning: Combined data size (", nrow(filtered_full_data),
+              ") is too small for ", input$regression_type,
+              " regression (recommended: ", min_size, ")."),
+        type = "warning",
+        duration = 10
+      )
+      return()
+    }
+
+    # Ensure that the dependent variable is from dataset Y and independents from X
+    dependent_var <- paste0(dataset_y_name, ".", input$dataset_y_variable_menu)
+    independent_vars <- paste0(dataset_x_name, ".", input$dataset_x_variable_menu)
+    lm_model <- NULL
+
+    # Perform regression based on the selected type
+    tryCatch({
+      if (input$pre_regression_type == "single") {
+        if (input$regression_type == "Linear") {
+          lm_model <- lm(site_measures_y ~ site_measures_x)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope
+          equation <- sprintf("y = %.4f + %.4fx", coefficients[1], coefficients[2])
+          calibration_value <- round((site_measures_y - coefficients[1]) / coefficients[2], 4)
+        } else if (input$regression_type == "Quadratic") {
+          lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2))
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
+          equation <- sprintf("y = %.4f + %.4fx + %.4fx^2", coefficients[1], coefficients[2], coefficients[3])
+
+          a <- coefficients[1]
+          b <- coefficients[2]
+          c <- coefficients[3]
+          y <- site_measures_y
+          actual_x <- site_measures_x
+
+          discriminant <- b^2 - 4 * c * (a - y)
+
+          # Check discriminant to avoid NaNs
+          discriminant[discriminant < 0] <- NA
+
+          sqrt_discriminant <- sqrt(discriminant)
+
+          x1 <- (-b + sqrt_discriminant) / (2 * c)
+          x2 <- (-b - sqrt_discriminant) / (2 * c)
+
+          # Choose the root closest to actual_x
+          calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)
+
+        } else if (input$regression_type == "Cubic") {
+          lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2) + I(site_measures_x^3))
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
+          equation <- sprintf("y = %.4f + %.4fx + %.4fx^2 + %.4fx^3", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
+
+
+          # Using numerical optimization to find x
+          actual_x <- site_measures_x
+          actual_y <- site_measures_y
+
+
+          # Define the cubic function
+          cubic_fn1 <- function(x, y) {
+            a <- coefficients[4]  # cubic coefficient
+            b <- coefficients[3]  # quadratic coefficient
+            c <- coefficients[2]  # linear coefficient
+            d <- coefficients[1]  # intercept
+
+            # Return the difference between predicted y and actual y
+            (a * x^3 + b * x^2 + c * x + d - y)^2
+          }
+
+          # Solve for each y value individually
+
+          calibration_value <- sapply(seq_along(actual_y), function(i) {
+            # Use the actual x as starting point for optimization
+            result <- optim(
+              par = actual_x[i],
+              fn = cubic_fn1,
+              y = actual_y[i],
+              method = "BFGS"
+            )
+
+            round(result$par, 4)
+          })
+        }
+
+      } else if (input$pre_regression_type == "multi_additive") {
+        site_measures_z <- filtered_full_data[[7]]
+        dataset_z_name <- strsplit(input$dataset_z_menu[1L], "\\.")[[1]][1]
+        independent_vars_z <- paste0(dataset_z_name, ".", input$dataset_z_variable_menu)
+        x2_values <- ifelse(is.na(site_measures_z), 0, site_measures_z)
+
+        if (input$regression_type == "Linear") {
+          lm_model <- lm(site_measures_y ~ site_measures_x + x2_values)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2", coefficients[1], coefficients[2], coefficients[3])
+          calibration_value <- round((site_measures_y - coefficients[1] - coefficients[3] * x2_values) / coefficients[2], 4)
+
+        } else if (input$regression_type == "Quadratic") {
+          lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2) + x2_values)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
+
+          a <- coefficients[3]  # x1^2 coefficient
+          b <- coefficients[2]  # x1 coefficient
+          c <- coefficients[1] + coefficients[4] * x2_values - site_measures_y
+
+          actual_x <- site_measures_x
+          discriminant <- b^2 - 4 * a * c
+          discriminant[discriminant < 0] <- NA
+
+          sqrt_discriminant <- sqrt(discriminant)
+          x1 <- (-b + sqrt_discriminant) / (2 * a)
+          x2 <- (-b - sqrt_discriminant) / (2 * a)
+
+          calibration_value <- round(ifelse(abs(x1 - actual_x) < abs(x2 - actual_x), x1, x2), 4)
+
+        } else if (input$regression_type == "Cubic") {
+          lm_model <- lm(site_measures_y ~ site_measures_x + I(site_measures_x^2) + I(site_measures_x^3) + x2_values)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx1^3 + %.4fx2", coefficients[1], coefficients[2], coefficients[3], coefficients[4], coefficients[5])
+
+          # Get values of x1, y, and the additional variable x2:
+          actual_x <- site_measures_x
+          actual_y <- site_measures_y
+
+          # Function to solve for x1 using the direct cubic root approach:
+          solve_cubic_x_multi <- function(y, x2, a, b, c, d, original_x) {
+            # The equation is: a * x^3 + b * x^2 + c * x + (d + coeff_x2 * x2 - y) = 0
+            # where:
+            #   a = coefficient for x1^3,
+            #   b = coefficient for x1^2,
+            #   c = coefficient for x1,
+            #   d = intercept,
+            #   coeff_x2 = coefficient for x2 (coefficients[5])
+            constant_term <- d + coefficients[5] * x2 - y
+            roots <- polyroot(c(constant_term, c, b, a))
+            real_roots <- Re(roots[abs(Im(roots)) < 1e-6])
+
+            if (length(real_roots) == 0) {
+              # No real roots found, so return NA
+              return(NA)
+            } else {
+              # Select the real root closest to the original x1 as reference
+              closest_root <- real_roots[which.min(abs(real_roots - original_x))]
+              return(round(closest_root, 4))
+            }
+          }
+
+          # Apply the function to all observations:
+          calibration_value <- sapply(seq_along(actual_y), function(i) {
+            solve_cubic_x_multi(
+              y = actual_y[i],
+              x2 = x2_values[i],
+              a = coefficients[4],
+              b = coefficients[3],
+              c = coefficients[2],
+              d = coefficients[1],
+              original_x = actual_x[i]
+            )
+          })
+        }
+
+      } else if (input$pre_regression_type == "multi_interactive") {
+        site_measures_z <- filtered_full_data[[7]]
+        dataset_z_name <- strsplit(input$dataset_z_menu[1L], "\\.")[[1]][1]
+        independent_vars_z <- paste0(dataset_z_name, ".", input$dataset_z_variable_menu)
+        x2_values <- ifelse(is.na(site_measures_z), 0, site_measures_z)
+
+        if (input$regression_type == "Linear") {
+          lm_model <- lm(site_measures_y ~ site_measures_x * x2_values)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx2 + %.4fx1x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4])
+          # Solve: y = b0 + b2*x2 + x1*(b1+b3*x2)
+          # Rearranged: x1 = (y - b0 - b2*x2) / (b1 + b3*x2)
+          calibration_value <- round((site_measures_y - coefficients[1] - coefficients[3] * x2_values) /
+                                      (coefficients[2] + coefficients[4] * x2_values), 4)
+
+        } else if (input$regression_type == "Quadratic") {
+          lm_model <- lm(site_measures_y ~ (site_measures_x + I(site_measures_x^2)) * x2_values)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx2 + %.4fx1x2 + %.4fx1^2x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4], coefficients[5], coefficients[6])
+
+          # For quadratic interactive:
+          # Model: y = (b0 + b3*x2) + x1*(b1+b4*x2) + x1^2*(b2+b5*x2)
+          # Define quadratic coefficients based on x2:
+          a <- coefficients[3] + coefficients[6] * x2_values  # Coefficient for x1^2
+          b <- coefficients[2] + coefficients[5] * x2_values  # Coefficient for x1
+          c <- coefficients[1] + coefficients[4] * x2_values - site_measures_y
+
+          # Calculate discriminant
+          discriminant <- b^2 - 4 * a * c
+          # Avoid NaNs by handling negative discriminant
+          discriminant[discriminant < 0] <- NA
+          sqrt_discriminant <- sqrt(discriminant)
+
+          # Solve quadratic equation for x1
+          x1_sol1 <- (-b + sqrt_discriminant) / (2 * a)
+          x1_sol2 <- (-b - sqrt_discriminant) / (2 * a)
+
+          # If an actual x1 value is available for guidance, use it to select the closer root.
+          actual_x1 <- site_measures_x
+          calibration_value <- round(ifelse(abs(x1_sol1 - actual_x1) < abs(x1_sol2 - actual_x1), x1_sol1, x1_sol2), 4)
+
+        } else if (input$regression_type == "Cubic") {
+          lm_model <- lm(site_measures_y ~ (site_measures_x + I(site_measures_x^2) + I(site_measures_x^3)) * x2_values)
+          coefficients <- coef(lm_model) # 1-Intercept, 2-slope, 3-quadratic, 4-cubic
+          equation <- sprintf("y = %.4f + %.4fx1 + %.4fx1^2 + %.4fx1^3 + %.4fx2 + %.4fx1x2 + %.4fx1^2x2 + %.4fx1^3x2", coefficients[1], coefficients[2], coefficients[3], coefficients[4], coefficients[5], coefficients[6], coefficients[7], coefficients[8])
+
+          actual_x1 <- site_measures_x
+          actual_y <- site_measures_y
+          # Define a function for cubic interactive model:
+          # Model: y = (b0+b4*x2) + x1*(b1+b5*x2) + x1^2*(b2+b6*x2) + x1^3*(b3+b7*x2)
+          cubic_fn2 <- function(x, y, x2) {
+            # Build the calibration prediction based on x1 (x) and known x2
+            pred <- (coefficients[1] + coefficients[5] * x2) +
+                    (coefficients[2] + coefficients[6] * x2) * x +
+                    (coefficients[3] + coefficients[7] * x2) * x^2 +
+                    (coefficients[4] + coefficients[8] * x2) * x^3
+            (pred - y)^2  # squared error
+          }
+
+          # Solve for x1 using numeric optimization for each observation
+          calibration_value <- sapply(seq_along(actual_y), function(i) {
+            # Use the actual x1 as a starting point for optimization.
+            result <- optim(par = actual_x1[i],
+                            fn = cubic_fn2,
+                            y = actual_y[i],
+                            x2 = x2_values[i],
+                            method = "BFGS")
+            round(result$par, 4)
+          })
+        }
+      }
+
+############################################################################
+############################################################################
+
+      # Create a list to store all the information for this ID
+      id_info <- list(
+        equation = equation,
+        coefficients = as.list(coefficients),
+        Coefficients = list(
+          dependent = dependent_var,
+          independent = as.list(coefficients)
+        ),
+        model_summary = summary(lm_model),
+        r_squared = summary(lm_model)$r.squared,
+        adjusted_r_squared = summary(lm_model)$adj.r.squared,
+        device_name = id_column_y
+      )
+
+      group_id <- paste(unique(selected_y_ids), collapse = ",")
+      # Add the equation to the id_equations list in the model
+      model <<- set_id_equation(model, group_id, id_info)
+
+
+      # Add the equation and other information to display_equation
+      display_equation[[length(display_equation) + 1]] <- list(
+        id = group_id,
+        equation = equation,
+        coefficients = as.list(coefficients),
+        r_squared = summary(lm_model)$r.squared
+      )
+
+
+      # Generate the corrected dataset
+      corrected_data <- list(
+        filtered_data_y = filtered_full_data,
+        calculated_values = calibration_value,
+        dependent_var = dependent_var,
+        independent_vars = independent_vars,
+        coefficients = coefficients,
+        r_squared = summary(lm_model)$r.squared
+      )
+
+      model <<- add_dataset_to_dictionary(model, group_id, corrected_data)
+
+    }, error = function(e) {
+      append_message(capture.output(cat("Error in regression:", e$message,
+                                        sep = "\n")))
+      showNotification(paste("Error in regression:", e$message), type = "error")
+    })
+
+
+    # -----------------------------------------------
+    # Convert display_equation to a Data Frame
+    # -----------------------------------------------
+    if (length(display_equation) > 0) {
+      # Convert each list item to a data frame row
+      equations_df <- do.call(rbind, lapply(display_equation, function(eq) {
+        data.frame(
+          Device_ID = eq$id,
+          Equation = eq$equation,
+          R_Squared = round(as.numeric(eq$r_squared), 4),
+          stringsAsFactors = FALSE
+        )
+      }))
+
+      # Store equations_df in the reactiveVal
+      equations_display_df(equations_df)
+
+      # -----------------------------------------------
+      # Render the Equations Table in the UI
+      # -----------------------------------------------
+      output$equations_list <- DT::renderDataTable({
+        DT::datatable(
+          equations_df,
+          options = list(
+            pageLength = 10,
+            autoWidth = TRUE
+          ),
+          caption = "Regression Equations and Statistics",
+          rownames = FALSE,
+          selection = "multiple"
+        )
+      })
+      showNotification("Regression coefficients generated successfully!", type = "message")
+    } else {
+      showNotification("No equations were generated.", type = "warning")
+    }
+
+
+
+  })
 
 
   ####################### Network Summary #####################################

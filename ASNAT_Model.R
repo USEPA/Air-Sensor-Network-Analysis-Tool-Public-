@@ -2269,7 +2269,7 @@ function(object, place_names) {
 ASNAT_declare_method("ASNAT_Model", "set_id_equation",
 function(object, id, equation_info) {
   ASNAT_check(methods::validObject(object))
-  stopifnot(is.numeric(id))
+  # stopifnot(is.numeric(id))
   stopifnot(!is.null(equation_info))
   stopifnot(is.list(equation_info))
 
@@ -2311,7 +2311,7 @@ function(object, key, dataset) {
   ASNAT_check(methods::validObject(object))
 
   # Ensure key is numeric
-  stopifnot(is.numeric(key))
+  # stopifnot(is.numeric(key))
 
   # key_str <- as.character(key)
 
