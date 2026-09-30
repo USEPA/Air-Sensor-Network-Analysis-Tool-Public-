@@ -26,92 +26,105 @@ STATUS:  unreviewed tested
 PURPOSE: ASNAT_nearest_point_cpp - Get distance (in meters) and index of point
          nearest a given point.
 INPUTS:  const double longitude          Longitude of reference point.
-         const double latitude           Latitude of reference point.
+         const double latitude           Latitude  of reference point.
+         const int site_id               Site id   of reference point.
+                                         or 0 if not self-comparing.
          const int count                 Number of points in longitudes[].
          const double* const longitudes  Longitudes of points to check.
          const double* const latitudes   Latitudes  of points to check.
-OUTPUTS: int* const nearest_index        Index into longitudes, latitudes of
-                                         point nearest the reference point.
+         const int* const site_ids       Site ids   of points to check.
+OUTPUTS: int* const nearest_site_id      Site id of point nearest the
+                                         reference point.
 RETURNS: double distance in meters between reference point and nearest point.
 ******************************************************************************/
 
 static double ASNAT_nearest_point_cpp(const double longitude,
                                       const double latitude,
+                                      const int site_id,
                                       const int count,
                                       const double* const longitudes,
                                       const double* const latitudes,
-                                      int* const nearest_index) {
+                                      const int* const site_ids,
+                                      int* const nearest_site_id) {
 
+  double result = 1e30;
   double nearest_distance_degrees = 1e30;
-  int the_nearest_index = 0;
-  *nearest_index = 0;
+  int nearest_index = -1;
+  *nearest_site_id = 0;
 
   for (int index = 0; index < count; ++index ) {
-    const double this_longitude = longitudes[index];
-    double longitude_distance = longitude - this_longitude;
+    const int this_site_id = site_ids[index];
 
-    if (longitude_distance < 0.0) {
-      longitude_distance = -longitude_distance;
-    }
+    if (this_site_id != site_id) {
+      const double this_longitude = longitudes[index];
+      double longitude_distance = longitude - this_longitude;
 
-    if (longitude_distance < nearest_distance_degrees) {
-      const double this_latitude = latitudes[index];
-      double latitude_distance = latitude - this_latitude;
-
-      if (latitude_distance < 0.0) {
-        latitude_distance = -latitude_distance;
+      if (longitude_distance < 0.0) {
+        longitude_distance = -longitude_distance;
       }
 
-      if (latitude_distance < nearest_distance_degrees) {
-        const double distance_degrees =
-          sqrt(longitude_distance * longitude_distance +
-          latitude_distance * latitude_distance);
+      if (longitude_distance < nearest_distance_degrees) {
+        const double this_latitude = latitudes[index];
+        double latitude_distance = latitude - this_latitude;
 
-        if (distance_degrees < nearest_distance_degrees) {
-          nearest_distance_degrees = distance_degrees;
-          the_nearest_index = index;
+        if (latitude_distance < 0.0) {
+          latitude_distance = -latitude_distance;
+        }
+
+        if (latitude_distance < nearest_distance_degrees) {
+          const double distance_degrees =
+            sqrt(longitude_distance * longitude_distance +
+            latitude_distance * latitude_distance);
+
+          if (distance_degrees < nearest_distance_degrees) {
+            nearest_distance_degrees = distance_degrees;
+            nearest_index = index;
+          }
         }
       }
     }
   }
 
-  *nearest_index = the_nearest_index;
-  const double nearest_longitude = longitudes[the_nearest_index];
-  const double nearest_latitude = latitudes[the_nearest_index];
+  if (nearest_index > -1) {
+    const double nearest_longitude = longitudes[nearest_index];
+    const double nearest_latitude = latitudes[nearest_index];
+    *nearest_site_id = site_ids[nearest_index];
 
-  // Compute distance in meters. http://en.wikipedia.org/wiki/Lat-lon
+    // Compute distance in meters. http://en.wikipedia.org/wiki/Lat-lon
 
-  static const double to_radians = 0.017453292519943;
-  static const double meters_per_degree_equator = 111132.954;
-  const double mean_latitude_radians =
-    (latitude + nearest_latitude) * 0.5 * to_radians;
-  const double mean_latitude_radians_2 =
-    mean_latitude_radians + mean_latitude_radians;
-  const double mean_latitude_radians_4 =
-    mean_latitude_radians_2 + mean_latitude_radians_2;
+    static const double to_radians = 0.017453292519943;
+    static const double meters_per_degree_equator = 111132.954;
+    const double mean_latitude_radians =
+      (latitude + nearest_latitude) * 0.5 * to_radians;
+    const double mean_latitude_radians_2 =
+      mean_latitude_radians + mean_latitude_radians;
+    const double mean_latitude_radians_4 =
+      mean_latitude_radians_2 + mean_latitude_radians_2;
 
-  const double meters_per_degree_longitude =
-    meters_per_degree_equator * cos(mean_latitude_radians);
-  const double meters_per_degree_latitude =
-    meters_per_degree_equator - 559.822 * cos(mean_latitude_radians_2) +
-    1.175 * cos(mean_latitude_radians_4);
+    const double meters_per_degree_longitude =
+      meters_per_degree_equator * cos(mean_latitude_radians);
+    const double meters_per_degree_latitude =
+      meters_per_degree_equator - 559.822 * cos(mean_latitude_radians_2) +
+      1.175 * cos(mean_latitude_radians_4);
 
-  const double delta_longitude = longitude - nearest_longitude;
-  const double delta_latitude = latitude - nearest_latitude;
+    const double delta_longitude = longitude - nearest_longitude;
+    const double delta_latitude = latitude - nearest_latitude;
 
-  const double delta_longitude_meters =
-    delta_longitude * meters_per_degree_longitude;
-  const double delta_latitude_meters =
-    delta_latitude * meters_per_degree_latitude;
-  const double delta_longitude_meters_squared =
-    delta_longitude_meters * delta_longitude_meters;
-  const double delta_latitude_meters_squared =
-    delta_latitude_meters * delta_latitude_meters;
+    const double delta_longitude_meters =
+      delta_longitude * meters_per_degree_longitude;
+    const double delta_latitude_meters =
+      delta_latitude * meters_per_degree_latitude;
+    const double delta_longitude_meters_squared =
+      delta_longitude_meters * delta_longitude_meters;
+    const double delta_latitude_meters_squared =
+      delta_latitude_meters * delta_latitude_meters;
 
-  const double nearest_distance_meters =
-    sqrt(delta_longitude_meters_squared + delta_latitude_meters_squared);
+    const double nearest_distance_meters =
+      sqrt(delta_longitude_meters_squared + delta_latitude_meters_squared);
 
-  const double result = nearest_distance_meters;
+    result = nearest_distance_meters;
+  }
+
   return result;
 }
 
@@ -198,10 +211,12 @@ INPUTS:  const double delta_meters              Minimum distance to match.
          const Rcpp::StringVector& timestamps_x String timestamps of X.
          const double* const longitudes_x       Longitudes of points in X.
          const double* const latitudes_x        Latitudes of points in X.
+         const int* const site_ids_x            Site ids of points in X.
          const int count_y                      Number of Y points.
          const Rcpp::StringVector& timestamps_y String timestamps of Y.
          const double* const longitudes_y       Longitudes of points in Y.
          const double* const latitudes_y        Latitudes of points in Y.
+         const int* const site_ids_y            Site ids of points in Y.
 OUTPUTS: std::list<int> result_x                List of indices into X of pairs
          std::list<int> result_y                List of indices into Y of pairs
 ******************************************************************************/
@@ -212,13 +227,16 @@ static void ASNAT_compare_datasets_cpp0(const double delta_meters,
                                         const Rcpp::StringVector& timestamps_x,
                                         const double* const longitudes_x,
                                         const double* const latitudes_x,
+                                        const int* const site_ids_x,
                                         const int count_y,
                                         const Rcpp::StringVector& timestamps_y,
                                         const double* const longitudes_y,
                                         const double* const latitudes_y,
+                                        const int* const site_ids_y,
                                         std::list<int>& result_x,
                                         std::list<int>& result_y) {
 
+  const bool is_self_compare = site_ids_x == site_ids_y;
   int start_index_y = 0;
   int result_count = 0;
   result_x.clear();
@@ -227,38 +245,43 @@ static void ASNAT_compare_datasets_cpp0(const double delta_meters,
   for (int index_x = 0; index_x < count_x; ++index_x) {
     const double longitude_x = longitudes_x[index_x];
     const double latitude_x = latitudes_x[index_x];
+    const int site_id_x = is_self_compare ? site_ids_x[index_x] : -1;
     const Rcpp::String& timestamp_x(timestamps_x[index_x]);
     const char* const c_timestamp_x = timestamp_x.get_cstring();
     int timestamp_matches = 0;
 
     for (int index_y = start_index_y; index_y < count_y; ++index_y) {
-      const Rcpp::String& timestamp_y(timestamps_y[index_y]);
-      const char* const c_timestamp_y = timestamp_y.get_cstring();
-      const int timestamp_comparison =
-        strncmp(c_timestamp_x, c_timestamp_y, timestamp_length);
+      const int site_id_y = is_self_compare ? site_ids_y[index_y] : -2;
 
-      // Note: timestamps are (assumed to be) sorted
-      // so the break logic below can be used to shorten this inner loop.
+      if (site_id_y != site_id_x) {
+        const Rcpp::String& timestamp_y(timestamps_y[index_y]);
+        const char* const c_timestamp_y = timestamp_y.get_cstring();
+        const int timestamp_comparison =
+          strncmp(c_timestamp_x, c_timestamp_y, timestamp_length);
 
-      if (timestamp_comparison < 0) {
-        start_index_y = index_y - timestamp_matches;
-        break;
-      }
+        // Note: timestamps are (assumed to be) sorted
+        // so the break logic below can be used to shorten this inner loop.
 
-      if (timestamp_comparison == 0) {
-        const double longitude_y = longitudes_y[index_y];
-        const double latitude_y = latitudes_y[index_y];
-        const bool is_neighbor =
-          ASNAT_is_nearby_point_cpp(delta_meters,
-                                    longitude_x, latitude_x,
-                                    longitude_y, latitude_y);
+        if (timestamp_comparison < 0) {
+          start_index_y = index_y - timestamp_matches;
+          break;
+        }
 
-        ++timestamp_matches;
+        if (timestamp_comparison == 0) {
+          const double longitude_y = longitudes_y[index_y];
+          const double latitude_y = latitudes_y[index_y];
+          const bool is_neighbor =
+            ASNAT_is_nearby_point_cpp(delta_meters,
+                                      longitude_x, latitude_x,
+                                      longitude_y, latitude_y);
 
-        if (is_neighbor && result_count < INT_MAX) {
-          result_x.push_back(index_x);
-          result_y.push_back(index_y);
-          ++result_count;
+          ++timestamp_matches;
+
+          if (is_neighbor && result_count < INT_MAX) {
+            result_x.push_back(index_x);
+            result_y.push_back(index_y);
+            ++result_count;
+          }
         }
       }
     }
@@ -515,6 +538,8 @@ PURPOSE: ASNAT_nearest_site_cpp - Get nearest site id and distance to
          point (longitude, latitude).
 INPUTS:  const double longitude                  Longitude of reference point.
          const double latitude                   Latitude  of reference point.
+         const int site_id                       Site id   of reference point
+                                                 or 0 if not self-comparing.
          const Rcpp::NumericVector& longitudes   Longitudes  of points.
          const Rcpp::NumericVector& latitudes    Latitudes   of points.
          const Rcpp::IntegerVector& site_ids     site ids of points.
@@ -527,6 +552,7 @@ NOTES: The export comment below is required!
 // [[Rcpp::export]]
 Rcpp::List ASNAT_nearest_site_cpp(const double longitude,
                                   const double latitude,
+                                  const int site_id,
                                   const Rcpp::NumericVector& longitudes,
                                   const Rcpp::NumericVector& latitudes,
                                   const Rcpp::IntegerVector& site_ids) {
@@ -534,12 +560,12 @@ Rcpp::List ASNAT_nearest_site_cpp(const double longitude,
   const int count = longitudes.length();
   const double* const longitudes0 = longitudes.begin();
   const double* const latitudes0 = latitudes.begin();
-  int nearest_index = 0;
+  const int* const site_ids0 = site_ids.begin();
+  int nearest_other_site_id = 0;
   const double nearest_other_site_distance =
-    ASNAT_nearest_point_cpp(longitude, latitude, count,
-                            longitudes0, latitudes0,
-                            &nearest_index);
-  const int nearest_other_site_id = site_ids[nearest_index];
+    ASNAT_nearest_point_cpp(longitude, latitude, site_id, count,
+                            longitudes0, latitudes0, site_ids0,
+                            &nearest_other_site_id);
   return Rcpp::List::create(Rcpp::Named("id") = nearest_other_site_id,
                             Rcpp::Named("distance") =
                               nearest_other_site_distance);
@@ -553,6 +579,8 @@ PURPOSE: ASNAT_compare_datasets_cpp - Return a pair of arrays of indices into
          and within delta_meters apart.
 INPUTS:  const Rcpp::DataFrame& data_frame_x  1st data frame to compare.
          const Rcpp::DataFrame& data_frame_y  2nd data frame to compare.
+         const int site_column_x      1-based index of site id in data_frame_x.
+         const int site_column_y      1-based index of site id in data_frame_y.
          const double delta_meters            Minimum distance to match.
          const bool is_hourly                 1 if hourly time matching.
 RETURNS: Rcpp::List  List of two named items "x" and "y" each of which are
@@ -564,6 +592,8 @@ NOTES: The export comment below is required!
 // [[Rcpp::export]]
 Rcpp::List ASNAT_compare_datasets_cpp(const Rcpp::DataFrame& data_frame_x,
                                       const Rcpp::DataFrame& data_frame_y,
+                                      const int site_column_x,
+                                      const int site_column_y,
                                       const double delta_meters,
                                       const bool is_hourly) {
 
@@ -578,15 +608,19 @@ Rcpp::List ASNAT_compare_datasets_cpp(const Rcpp::DataFrame& data_frame_x,
   const Rcpp::StringVector& timestamps_x(data_frame_x[0]);
   const Rcpp::NumericVector& longitudes_x(data_frame_x[1]);
   const Rcpp::NumericVector& latitudes_x(data_frame_x[2]);
+  const Rcpp::IntegerVector& site_ids_x(data_frame_x[site_column_x - 1]);
   const double* const longitudes_x_0 = longitudes_x.begin();
   const double* const latitudes_x_0 = latitudes_x.begin();
+  const int* const site_ids_x_0 = site_ids_x.begin();
   const int count_x = timestamps_x.length();
 
   const Rcpp::StringVector& timestamps_y(data_frame_y[0]);
   const Rcpp::NumericVector& longitudes_y(data_frame_y[1]);
   const Rcpp::NumericVector& latitudes_y(data_frame_y[2]);
+  const Rcpp::IntegerVector& site_ids_y(data_frame_y[site_column_y - 1]);
   const double* const longitudes_y_0 = longitudes_y.begin();
   const double* const latitudes_y_0 = latitudes_y.begin();
+  const int* const site_ids_y_0 = site_ids_y.begin();
   const int count_y = timestamps_y.length();
 
   // Use a linked-list to avoid reallocation and copying of an unknown number
@@ -598,8 +632,10 @@ Rcpp::List ASNAT_compare_datasets_cpp(const Rcpp::DataFrame& data_frame_x,
   ASNAT_compare_datasets_cpp0(delta_meters, timestamp_length,
                               count_x,
                               timestamps_x, longitudes_x_0, latitudes_x_0,
+                              site_ids_x_0,
                               count_y,
                               timestamps_y, longitudes_y_0, latitudes_y_0,
+                              site_ids_y_0,
                               list_x, list_y);
 
   // Convert linked-lists of 0-based indices into R vectors of 1-based indices:

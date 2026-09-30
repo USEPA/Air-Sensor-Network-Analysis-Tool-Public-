@@ -124,8 +124,41 @@ function(coverage,
 
 # Getters:
 
+
 ASNAT_declare_method("ASNAT_Dataset", "coverage",
-function(object) object@coverage)
+function(object) {
+  result <- object@coverage
+
+  if (length(object@url) >= 1L) {
+    first_url <- object@url[[1L]]
+
+    # If specified, add OpenAQ sensor type to coverage source:
+
+    if (grepl(fixed = TRUE, "&COVERAGE=OpenAQ.", first_url) &&
+        grepl(fixed = TRUE, "&SENSOR_TYPE=", first_url)) {
+      sensor_type <- ""
+      url_parts <- unlist(strsplit(first_url, "[&=]"))
+
+      for (index in seq_along(url_parts)) {
+
+        if (url_parts[[index]] == "SENSOR_TYPE") {
+          sensor_type <- url_parts[index + 1L]
+          break
+        }
+      }
+
+      if (nchar(sensor_type) > 0L) {
+        coverage_parts <- unlist(strsplit(fixed = TRUE, object@coverage, "."))
+        source_part <- coverage_parts[[1L]]
+        variable_part <- coverage_parts[[2L]]
+        result <- paste0(source_part, "_", sensor_type, ".", variable_part)
+      }
+    }
+  }
+
+  return(result)
+})
+
 
 ASNAT_declare_method("ASNAT_Dataset", "start_date",
 function(object) object@start_date)
@@ -258,8 +291,15 @@ function(object) {
 ASNAT_declare_method("ASNAT_Dataset", "coverage_source",
 function(object) {
   stopifnot(methods::validObject(object))
-  parts <- unlist(strsplit(object@coverage, ".", fixed = TRUE))
+  parts <- unlist(strsplit(coverage(object), ".", fixed = TRUE))
   result <- parts[[1L]]
+
+  # E.g., CASTNET.QuantAQ becomes CASTNET_QuantAQ:
+
+  if (length(parts) > 2L) {
+    result <- paste0(result, "_", parts[[2L]])
+  }
+
   return(result)
 })
 
@@ -269,12 +309,9 @@ function(object) {
 ASNAT_declare_method("ASNAT_Dataset", "source_variable",
 function(object) {
   stopifnot(methods::validObject(object))
-  parts <- unlist(strsplit(object@coverage, ".", fixed = TRUE))
-  source <- parts[[1L]]
-  result <- paste0(source, ".", variable_name(object))
+  result <- paste0(coverage_source(object), ".", variable_name(object))
   return(result)
 })
-
 
 
 # Get minimum data value:
@@ -314,7 +351,7 @@ function(object, dataset2, total_timesteps, delta_meters, directory,
   stopifnot(methods::validObject(object))
   stopifnot(is.null(dataset2) || class(dataset2) == "ASNAT_Dataset")
   stopifnot(delta_meters >= 0.0)
-  stopifnot(delta_meters <= 10000.0)
+  stopifnot(delta_meters <= ASNAT_maximum_neighbor_distance)
   stopifnot(total_timesteps >= 1L)
   #stopifnot(dir.exists(directory))
   stopifnot(file_format == "csv" || file_format == "tsv")
@@ -331,17 +368,12 @@ function(object, dataset2, total_timesteps, delta_meters, directory,
   }
 
   compare <- !is.null(dataset2)
-  the_coverage <- coverage(dataset)
-  parts <- unlist(strsplit(the_coverage, ".", fixed = TRUE))
-  source <- parts[[1L]]
-  variable <- paste0(source, ".", variable_name(dataset))
+  variable <- paste0(coverage_source(dataset), ".", variable_name(dataset))
   variable2 <- NULL
 
   if (compare) {
-    the_coverage <- coverage(dataset2)
-    parts <- unlist(strsplit(the_coverage, ".", fixed = TRUE))
-    source <- parts[[1L]]
-    variable2 <- paste0(source, ".", variable_name(dataset2))
+    variable2 <-
+      paste0(coverage_source(dataset2), ".", variable_name(dataset2))
   }
 
   file_name <-
@@ -355,7 +387,7 @@ function(object, dataset2, total_timesteps, delta_meters, directory,
 
     # One line before header:
 
-    cat(sep = "", file = output_file, "Dataset Summary: ", variable)
+    cat(sep = "", file = output_file, "Summary: ", variable)
 
     if (compare) {
       cat(sep = "", file = output_file, append = TRUE, " vs ", variable2)
@@ -451,7 +483,7 @@ function(object) {
       !is.element(nowcast_column_name, column_names)) {
 
     # Insert column of nowcast measures (initialized to NA) before flagged
-    # or lsast column:
+    # or last column:
 
     row_count <- nrow(the_data_frame)
     nowcast_vector <- rep(as.numeric(NA), row_count)
@@ -554,6 +586,198 @@ function(object) {
   }
 
   return(object)
+})
+
+
+
+# Compute local daily mean of current variable unflagged measures:
+
+ASNAT_declare_method("ASNAT_Dataset", "compute_local_daily_mean",
+function(object, first_day, last_day) {
+  ASNAT_dprint("In ASNAT_Dataset compute_local_daily_mean()\n")
+  stopifnot(methods::validObject(object))
+  stopifnot(methods::validObject(object))
+  stopifnot(class(first_day) == "Date")
+  stopifnot(class(last_day) == "Date")
+  stopifnot(first_day <= last_day)
+  timer <- ASNAT_start_timer()
+
+  result <- NULL
+  the_data_frame <- object@data_frame
+  column_names <- colnames(the_data_frame)
+  site_column <- ASNAT_site_column_index(column_names)
+  sites <- the_data_frame[[site_column]]
+  unique_sites <- unique(sort.int(sites))
+  the_variable_column <- object@variable_column
+  name_units <- column_names[[the_variable_column]]
+  daily_column_name <- gsub(fixed = TRUE, "_hourly", "_daily", name_units)
+  daily_file_name <-
+    gsub(fixed = TRUE, "_hourly", "_local_daily", object@file_name)
+  flagged_column <- ASNAT_flagged_column_index(column_names)
+  flagged_column_name <- NULL
+  flagged <- NULL
+
+  if (flagged_column != 0L) {
+    flagged <- the_data_frame[[flagged_column]]
+    flagged_column_name <- column_names[[flagged_column]]
+  } else {
+    flagged <- rep("0", length(sites))
+    flagged_column_name <- "flagged(-)"
+  }
+
+  last_column <- length(column_names)
+  notes <- the_data_frame[[last_column]]
+  hourly_timestamps <- substr(the_data_frame[[1L]], 1L, 13L) # yyyy-mm-ddThh
+  measures <- the_data_frame[[the_variable_column]]
+  longitudes <- the_data_frame[[2L]]
+  latitudes <- the_data_frame[[3L]]
+  elevations <- NULL
+  dates <- first_day:last_day
+  days <- length(dates)
+  unique_site_count <- length(unique_sites)
+  output_rows <- days * unique_site_count
+  daily_timestamps <- rep("", output_rows)
+  output_longitudes <- rep(as.numeric(NA), output_rows)
+  output_latitudes <- rep(as.numeric(NA), output_rows)
+  output_elevations <- NULL
+  has_elevation <- column_names[[4L]] == "elevation(m)"
+
+  if (has_elevation) {
+    elevations <- the_data_frame[[4L]]
+    output_elevations <- rep(as.numeric(NA), output_rows)
+  }
+
+  output_ids <- rep(as.integer(NA), output_rows)
+  counts <- rep(0L, output_rows)
+  means <- rep(as.numeric(NA), output_rows)
+  output_flagged <- rep("0", output_rows)
+  output_notes <- rep("", output_rows)
+
+  # Allocate and compute UTC STD hour offset for each unique site (SLOW):
+
+  unique_site_index <- 0L
+  site_utc_std_hour_offsets <- rep(as.integer(NA), unique_site_count)
+
+  for (site in unique_sites) {
+    matched_rows <- which(sites == site & flagged == "0")
+    stopifnot(length(matched_rows) >= 1L)
+    site_longitude <- longitudes[matched_rows][1L]
+    site_latitude <- latitudes[matched_rows][1L]
+    unique_site_index <- unique_site_index + 1L
+    site_utc_std_hour_offsets[[unique_site_index]] <-
+      ASNAT_UTC_offset_at_location(site_longitude, site_latitude) # SLOW.
+  }
+
+  index <- 0L
+
+  for (the_date in dates) {
+    yyyy_mm_dd <- format(as.Date(the_date, .Date(0L)), "%Y-%m-%d")
+    unique_site_index <- 0L
+
+    for (site in unique_sites) {
+      unique_site_index <- unique_site_index + 1L
+      site_utc_std_hour_offset <- site_utc_std_hour_offsets[[unique_site_index]]
+
+      ASNAT_dprint("\n%s site = %d UTC offset = %d ",
+                   yyyy_mm_dd, site, site_utc_std_hour_offset)
+
+      if (!is.na(site_utc_std_hour_offset)) {
+        matched_rows <- which(sites == site & flagged == "0")
+        stopifnot(length(matched_rows) >= 1L)
+        site_longitude <- longitudes[matched_rows][1L]
+        site_latitude <- latitudes[matched_rows][1L]
+        site_timestamps <- hourly_timestamps[matched_rows]
+        site_measures <- measures[matched_rows]
+        site_local_daily_mean_result <-
+          ASNAT_local_daily_mean(yyyy_mm_dd, site_utc_std_hour_offset,
+                                 site_timestamps, site_measures)
+
+        ASNAT_dprint(" count = %d, mean = %f ",
+                     site_local_daily_mean_result$count,
+                     site_local_daily_mean_result$mean)
+
+        if (site_local_daily_mean_result$count > 0L) {
+          index <- index + 1L
+          means[[index]] <- site_local_daily_mean_result$mean
+          counts[[index]] <- site_local_daily_mean_result$count
+          daily_timestamps[[index]] <- paste0(yyyy_mm_dd, "T00:00:00-0000")
+          output_longitudes[[index]] <- site_longitude
+          output_latitudes[[index]] <- site_latitude
+
+          if (has_elevation) {
+            site_elevation <- elevations[matched_rows][1L]
+            output_elevations[[index]] <- site_elevation
+          }
+
+          output_ids[[index]] <- site
+          output_notes[[index]] <- notes[matched_rows][1L]
+        }
+      }
+    }
+  }
+
+  ASNAT_dprint("\nFinal local daily unique site count = %d\n", index)
+
+  if (index > 0L) {
+    output_variable_column <- 6L
+
+    if (has_elevation) {
+      output_variable_column <- 7L
+      output_data_frame <-
+        data.frame(daily_timestamps[1L:index],
+                   output_longitudes[1L:index],
+                   output_latitudes[1L:index],
+                   output_elevations[1L:index],
+                   output_ids[1L:index],
+                   counts[1L:index],
+                   means[1L:index],
+                   output_flagged[1L:index],
+                   output_notes[1L:index])
+      colnames(output_data_frame) <-
+        c(column_names[[1L]],
+          column_names[[2L]],
+          column_names[[3L]],
+          column_names[[4L]],
+          column_names[[5L]],
+          column_names[[6L]],
+          daily_column_name,
+          flagged_column_name,
+          column_names[[last_column]])
+    } else {
+      output_data_frame <-
+        data.frame(daily_timestamps[1L:index],
+                   output_longitudes[1L:index],
+                   output_latitudes[1L:index],
+                   output_ids[1L:index],
+                   counts[1L:index],
+                   means[1L:index],
+                   output_flagged[1L:index],
+                   output_notes[1L:index])
+      colnames(output_data_frame) <-
+        c(column_names[[1L]],
+          column_names[[2L]],
+          column_names[[3L]],
+          column_names[[4L]],
+          column_names[[5L]],
+          daily_column_name,
+          flagged_column_name,
+          column_names[[last_column]])
+    }
+
+    result <-
+      ASNAT_Dataset(object@coverage,
+                    first_day,
+                    last_day,
+                    aggregate = "daily",
+                    object@url,
+                    file_name = daily_file_name,
+                    note = "computed local daily mean",
+                    output_data_frame,
+                    output_variable_column)
+  }
+
+  ASNAT_elapsed_timer("compute_local_daily_mean:", timer)
+  return(result)
 })
 
 

@@ -124,7 +124,7 @@ function(app_directory, data_subdirectory = NULL) {
                           datasets = vector(),
                           ok = TRUE,
                           current_version = current_version,
-                          timeout_seconds = 300L,
+                          timeout_seconds = ASNAT_default_timeout_seconds,
                           rsigserver_url = rsigserver_url,
                           data_directory = data_directory,
                           retrieving_url_callback = function(...) {},
@@ -386,7 +386,10 @@ function(object,
          south_bound, north_bound,
          purple_air_key = "",
          purple_air_sensor = 0L,
-         aqs_pm25_codes = "") {
+         maximum_qc_airnow = 4L,
+         aqs_pm25_codes = "",
+         openaq_sensor_type = "",
+         compute_local_daily = FALSE) {
 
   ASNAT_dprint("In retrieve_data()\n")
 
@@ -411,20 +414,34 @@ function(object,
   stopifnot(north_bound <= 90.0)
   stopifnot(south_bound <= north_bound)
 
-  stopifnot(length(grep(fixed = TRUE, "PurpleAir", coverage)) == 0L ||
+  stopifnot(!startsWith(coverage, "PurpleAir") ||
             ASNAT_is_conforming_purple_air_key(purple_air_key))
 
   stopifnot(purple_air_sensor >= 0L)
 
+  stopifnot(class(maximum_qc_airnow) == "numeric" ||
+            class(maximum_qc_airnow) == "integer")
+  stopifnot(as.integer(maximum_qc_airnow) >= 0L)
+  stopifnot(as.integer(maximum_qc_airnow) <= length(ASNAT_airnow_qc_flags))
+
   stopifnot(nchar(aqs_pm25_codes) == 0L ||
             ASNAT_is_valid_aqs_pm25_codes(aqs_pm25_codes))
+
+  stopifnot(nchar(openaq_sensor_type) == 0L ||
+            ASNAT_is_valid_openaq_sensor_type(openaq_sensor_type))
+
+  stopifnot(is.logical(compute_local_daily))
 
   object@ok <- FALSE
   object@retrieved_urls <- vector()
   options <- ""
   sensor_tag <- ""
 
-  if (length(grep(fixed = TRUE, "PurpleAir", coverage))) {
+  compute_local_daily <-
+    compute_local_daily && aggregate == "daily" &&
+    coverage == "PurpleAir.pm25_corrected"
+
+  if (startsWith(coverage, "PurpleAir")) {
     aggregate_option <- paste0("&AGGREGATE=", aggregate)
 
     # Use pre-aggregated pseudo-variable if available:
@@ -440,7 +457,12 @@ function(object,
 
     if (coverage %in% pre_aggregated_variables) {
       aggregate_option <- ""
-      coverage <- paste0(coverage, "_", aggregate)
+
+      if (compute_local_daily) {
+        coverage <- paste0(coverage, "_hourly")
+      } else {
+        coverage <- paste0(coverage, "_", aggregate)
+      }
     }
 
     sensor_option <- ""
@@ -466,7 +488,8 @@ function(object,
       options <- paste0(options, "&AGGREGATE=daily_mean")
     }
   } else if (length(grep(fixed = TRUE, "AirNow", coverage)) ||
-             length(grep(fixed = TRUE, "METAR", coverage))) {
+             length(grep(fixed = TRUE, "METAR", coverage)) ||
+             length(grep(fixed = TRUE, "OpenAQ", coverage))) {
 
     if (aggregate != "hourly") {
       options <- paste0("&AGGREGATE=", aggregate)
@@ -474,6 +497,7 @@ function(object,
 
     if (length(grep(fixed = TRUE, "AirNow", coverage))) {
       options <- paste0(options, "&FILTER_MISSING=1")
+      options <- paste0(options, "&MAXIMUM_QC=", maximum_qc_airnow)
     }
   }
 
@@ -483,11 +507,25 @@ function(object,
     options <- paste0(options, "&ONLY_CODES=", aqs_pm25_codes)
   }
 
+  coverage_underscores <- gsub(fixed = TRUE, ".", "_", coverage)
+
+  if (grepl(fixed = TRUE, "OpenAQ.", coverage) &&
+      nchar(openaq_sensor_type) > 0 && openaq_sensor_type != "all") {
+    options <- paste0(options, "&SENSOR_TYPE=", openaq_sensor_type)
+
+    # Also include sensor type in the file name:
+
+    parts <- unlist(strsplit(fixed = TRUE, coverage, "."))
+
+    if (length(parts) == 2L) {
+      coverage_underscores <-
+        paste0("OpenAQ_", openaq_sensor_type, "_", parts[[2L]])
+    }
+  }
+
   # To avoid http timeout while waiting for multi-day processing,
   # request one day at a time and concatenate ASCII results to output file
   # (except for all but the first header line):
-
-  coverage_underscores <- gsub(fixed = TRUE, ".", "_", coverage)
 
   file_name <- paste0(
     object@data_directory, "/",
@@ -506,10 +544,19 @@ function(object,
   }
 
   request_date <- start_date
+
+  if (compute_local_daily) {
+    request_date <- request_date - 1L
+  }
+
   done <- FALSE
   retrieved_days_count <- 0L
   requested_days_count <- 0L
   total_days <- 1L + as.integer(end_date) - as.integer(start_date)
+
+  if (compute_local_daily) {
+    total_days <- total_days + 2L
+  }
 
   while (!done) {
     yyyy_mm_dd <- format(request_date, "%Y-%m-%d")
@@ -572,7 +619,7 @@ function(object,
 
     requested_days_count <- requested_days_count + 1L
     request_date <- request_date + 1L
-    done <- request_date > end_date
+    done <- request_date > end_date + as.integer(compute_local_daily)
 
     ASNAT_dprint("request_date = %d, end_date = %d, done = %d\n",
                  request_date, end_date, as.integer(done))
@@ -665,6 +712,10 @@ function(object,
                             data_frame = data_frame,
                             variable_column = data_column_index)
 
+            if (compute_local_daily) {
+              dataset <- compute_local_daily_mean(dataset, start_date, end_date)
+            }
+
             found <- FALSE
 
             for (index in seq_along(object@datasets)) {
@@ -734,7 +785,8 @@ function(object, start_date, end_date, key) {
                   time_option)
 
     file_name <- paste0(object@data_directory, "/PurpleAirSites.txt")
-    ok <- ASNAT_http_get(url, object@timeout_seconds, file_name)
+    longest_timeout_seconds <- 0L
+    ok <- ASNAT_http_get(url, longest_timeout_seconds, file_name)
 
     if (ok) {
 

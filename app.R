@@ -108,8 +108,13 @@ if (Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect") {
 
 purple_air_attribution_url <- "https://www2.purpleair.com/pages/attribution"
 
+airnow_qc_url <-
+  "https://www.airnowtech.org/resources/AIRNow-I_AQCSV-Final.pdf"
+
 aqs_parameter_codes_url <-
   "https://aqs.epa.gov/aqsweb/documents/codetables/parameters.html"
+
+openaq_url <- "https://openaq.org/partners/"
 
 nowcast_url <-
   "https://en.wikipedia.org/wiki/NowCast_(air_quality_index)"
@@ -125,10 +130,17 @@ the_map_height <- "744px"
 the_site_neighbor_map_width <- "496px"
 the_site_neighbor_map_height <- "372px"
 
-# Plot width/height are in inches:
+# PDF plot files width/height are in inches:
+
 the_pdf_width <- 8L
 the_pdf_height <- 6L
 the_pdf_point_size <- 9L
+
+# PNG plot files width/height are in pixels:
+
+the_png_width <- 800L
+the_png_height <- 600L
+the_png_point_size <- 4L
 
 # List of variables|units|description available from rsigserver webservice:
 
@@ -137,7 +149,7 @@ webservice_variable_metadata <- list(
   "AirNow.pm10|ug/m3|UTC hourly mean surface measured particulate matter (aerosols) 10 microns or smaller in diameter in micrograms per cubic meter.",
   "AirNow.rh|%|UTC hourly mean surface measured relative humidity percentage.",
   "AirNow.temperature|C|UTC hourly mean surface measured air temperature (C)",
-  "AirNow.pressure|C|UTC hourly mean surface measured atmospheric pressure (hPa)",
+  "AirNow.pressure|hpa|UTC hourly mean surface measured atmospheric pressure (hPa)",
   "AirNow.ozone|ppb|UTC hourly mean surface measured ozone (ppb).",
   "AirNow.no2|ppb|UTC hourly mean surface measured nitrogen dioxide (ppb).",
   "AirNow.co|ppm|UTC hourly mean surface measured carbon monoxide (ppm).",
@@ -146,7 +158,7 @@ webservice_variable_metadata <- list(
   "AQS.pm10|ug/m3|UTC hourly mean surface measured particulate matter (aerosols) 10 microns or smaller in diameter in micrograms per cubic meter.",
   "AQS.rh|%|UTC hourly mean surface measured relative humidity in percent.",
   "AQS.temperature|C|UTC hourly mean surface measured air temperature (C)",
-  "AQS.pressure|C|UTC hourly mean surface measured atmospheric pressure (hPa)",
+  "AQS.pressure|hpa|UTC hourly mean surface measured atmospheric pressure (hPa)",
   "AQS.ozone|ppb|UTC hourly mean surface measured ozone (ppb).",
   "AQS.no2|ppb|UTC hourly mean surface measured nitrogen dioxide (ppb).",
   "AQS.co|ppm|UTC hourly mean surface measured carbon monoxide (ppm).",
@@ -154,6 +166,27 @@ webservice_variable_metadata <- list(
   "METAR.relativeHumidity|%|Relative humidity (computed using Magnus approximation formula from temperature and dewPoint).",
   "METAR.temperature|C|Air temperature in degrees C.",
   "METAR.seaLevelPress|hPa|Atmospheric pressure equivalent at sea level in hPa.",
+  "OpenAQ.pm1|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter.",
+  "OpenAQ.pm25|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter.",
+  "OpenAQ.pm10|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter.",
+  "OpenAQ.humidity|%|Sensor measured relative humidity.",
+  "OpenAQ.temperature|C|Sensor measured temperature.",
+  "OpenAQ.pressure|hpa|Sensor measured atmospheric pressure.",
+  "OpenAQ.o3|ppb|Sensor measured ozone concentration.",
+  "OpenAQ.no2|ppb|Sensor measured nitrogen dioxide concentration.",
+  "OpenAQ.co|ppm|Sensor measured carbon monoxide concentration.",
+  "OpenAQ.so2|ppb|Sensor measured sulfur dioxide concentration.",
+  "CASTNET.PurpleAir.pm25_corrected|ug/m3|Scaled humidity-corrected sensor measured particulate matter not more than 2.5 microns in diameter.",
+  "CASTNET.PurpleAir.humidity|%|Sensor measured relative humidity.",
+  "CASTNET.PurpleAir.temperature|C|Sensor measured temperature.",
+  "CASTNET.QuantAQ.pm1|ug/m3|Sensor measured particulate matter not more than 1 micron in diameter.",
+  "CASTNET.QuantAQ.pm25|ug/m3|Sensor measured particulate matter not more than 2.5 microns in diameter.",
+  "CASTNET.QuantAQ.pm10|ug/m3|Sensor measured particulate matter not more than 10 microns in diameter.",
+  "CASTNET.QuantAQ.humidity|%|Sensor measured relative humidity.",
+  "CASTNET.QuantAQ.temperature|C|Sensor measured temperature.",
+  "CASTNET.QuantAQ.o3|ppb|Sensor measured ozone concentration.",
+  "CASTNET.QuantAQ.no2|ppb|Sensor measured nitrogen dioxide concentration.",
+  "CASTNET.QuantAQ.co|ppm|Sensor measured carbon monoxide concentration.",
   "PurpleAir.pm25_corrected|ug/m3|Scaled humidity-corrected particulate matter not more than 2.5 microns in diameter.",
   "PurpleAir.humidity|%|Sensor measured relative humidity inside the sensor housing (on average 4% lower than ambient conditions).",
   "PurpleAir.temperature|C|Temperature inside of the sensor housing. On average, this is 4C higher than ambient conditions.",
@@ -215,12 +248,12 @@ webservice_variable_metadata <- list(
   "" # End of list.
 )
 
-webservice_local_daily_variable_metadata <- list(
+webservice_local_daily_variable_metadata <- append(list(
   "AQS.ozone_8hour_average|ppb|Local daily surface measured ozone 8-hour average.",
   "AQS.ozone_8hour_maximum|ppb|Local daily surface measured ozone 8-hour maximum.",
   "AQS.pm25_daily_filter|ppb|Local daily surface measured particulate matter (aerosols) 2.5 microns or smaller in diameter.",
   "" # End of list.
-)
+), webservice_variable_metadata)
 
 # Construct lists used for menus and tooltips:
 
@@ -376,7 +409,9 @@ glyph_scale <- 2L
 glyph_border_color <- "black"
 
 
-# glyph pch codes: https://r-lang.com/pch-in-r/
+# glyph pch codes.
+# Only symbols 21-25 allow for arbitrary fill color.
+# https://r-charts.com/base-r/pch-symbols/
 
 the_glyphs <- list(filled_triangle_pointing_down = 25L,
                    filled_diamond = 23L,
@@ -404,14 +439,16 @@ map_glyph <- function(coverage) {
   data_source <- parts[[1L]]
   result <- the_glyphs$filled_triangle_pointing_down
 
-  if (data_source == "AirNow") {
-    result <- the_glyphs$filled_diamond
-  } else if (data_source == "AQS") {
+  if (data_source == "AirNow" || data_source == "AQS") {
     result <- the_glyphs$filled_square
   } else if (data_source == "METAR") {
     result <- the_glyphs$filled_triangle_pointing_up
-  } else if (data_source == "PurpleAir") {
+  } else if (grepl("PurpleAir", coverage, fixed = TRUE)) {
     result <- the_glyphs$filled_circle
+  } else if (grepl("QuantAQ", coverage, fixed = TRUE)) {
+    result <- the_glyphs$filled_diamond
+  } else if (grepl("Government", coverage, fixed = TRUE)) {
+    result <- the_glyphs$filled_diamond
   }
 
   return(result)
@@ -688,7 +725,7 @@ ui <- fluidPage(
                   multiple = TRUE, # Allow multiple selections.
                   selectize = FALSE, # Disable search feature.
                   choices = webservice_variables,
-                  size = 27L), # Number of rows shown in the scrollable list.
+                  size = 48L), # Number of rows shown in the scrollable list.
 
       shinyBS::bsTooltip("coverage_menu",
                          paste0("Select one or two variables to retrieve ",
@@ -733,14 +770,15 @@ ui <- fluidPage(
       ),
 
       actionButton("validate_purple_air_key",
-                   label = "Validate Purple Air Key",
+                   label = "Validate Purple Air Key / Get Sites",
                    style = "color : red;"),
 
       shinyBS::bsTooltip("validate_purple_air_key",
                          paste0("Before retrieving PurpleAir data ",
                                 "you must validate the Purple Air key ",
                                 "(a webservice call). ",
-                                "This also updates the Purple Air Sites menu."),
+                                "This also gets the Purple Air global Sites ",
+                                "list for the current date range."),
                          options = tooltip_options),
 
       shinyBS::bsModal("invalid_retrieve_data_Modal",
@@ -748,9 +786,9 @@ ui <- fluidPage(
                        trigger = NULL,
                        size = "small",
                        p("Please make sure:"),
-                       p("1. Rsig server is running."),
-                       p("2. The data is available in the Rsig server."),
-                       p("3. You have a valid Purple Air key."),
+                       p("1. rsigserver webservice is accessible."),
+                       p("2. The expected data is available for the date range and viewing area."),
+                       p("3. If retrieving Purple Air data, you have a valid Purple Air key."),
                        tags$ul(
                          tags$li("Requested an API key from ",
                                 tags$a(href = "mailto:contact@purpleair.com",
@@ -765,8 +803,25 @@ ui <- fluidPage(
 
       shinyBS::bsTooltip("purple_air_sites_menu",
                          paste0("Optionally select a single PurpleAir sensor ",
-                                "within the viewing area to retrieve ",
-                                "(or 0 for all sensors)."),
+                                "to retrieve (or 0 for all sensors). ",
+                                "Only sensors within the current viewing ",
+                                "area are shown in the menu."),
+                         placement = "top",
+                         options = tooltip_options),
+
+      tags$a(href = airnow_qc_url, target = "_blank",
+             "AirNow QC flags on page 28"),
+
+      selectizeInput("maximum_qc_airnow_menu",
+                     label = "Maximum QC for AirNow data",
+                     options = list(maxItems = 1L),
+                     selected = ASNAT_airnow_qc_flags[[1L + maximum_qc_airnow(default_model)]],
+                     choices = ASNAT_airnow_qc_flags),
+
+      shinyBS::bsTooltip("maximum_qc_airnow_menu",
+                         paste0("Allow retrieval of AirNow measures with ",
+                                "QC flag not more than: ",
+                                paste(ASNAT_airnow_qc_flags, collapse = ", ")),
                          placement = "top",
                          options = tooltip_options),
 
@@ -782,6 +837,21 @@ ui <- fluidPage(
       shinyBS::bsTooltip("aqs_pm25_codes_menu",
                          paste0("Optionally select a subset of AirNow/AQS pm25",
                                 " parameter codes to retrieve."),
+                         placement = "right",
+                         options = tooltip_options),
+
+      tags$a(href = openaq_url, target = "_blank",
+             "Missing context may be needed from OpenAQ or the data provider"),
+
+      selectizeInput("openaq_sensor_type_menu",
+                     label = "OpenAQ sensor types:",
+                     options = list(maxItems = 1L),
+                     selected = openaq_sensor_type(default_model),
+                     choices = ASNAT_openaq_sensor_types),
+
+      shinyBS::bsTooltip("openaq_sensor_type_menu",
+                         paste0("Optionally select a subset of OpenAQ",
+                                " sensor types to retrieve."),
                          placement = "right",
                          options = tooltip_options),
 
@@ -974,9 +1044,10 @@ ui <- fluidPage(
                numericInput("maximum_neighbor_distance",
                             #label = "Max neighbor distance(m):",
                             label = NULL,
-                            width = "80px",
+                            width = "100px",
                             value = maximum_neighbor_distance(default_model),
-                            min = 0.0, max = 10000.0, step = 100.0)),
+                            min = 0.0, max = ASNAT_maximum_neighbor_distance,
+                            step = 100.0)),
 
       shinyBS::bsTooltip("maximum_neighbor_distance",
                          paste0("Maximum distance in meters between ",
@@ -1718,6 +1789,16 @@ ui <- fluidPage(
                                     "Use interactive/color plots.",
                                     options = tooltip_options),
 
+                 checkboxInput("use_right_side_stats_label",
+                                label = "Use right side stats label",
+                                value = use_right_side_stats_label(default_model)),
+
+                 shinyBS::bsTooltip("use_right_side_stats_label",
+                                    paste0("In scatterplots, ",
+                                           "draw the stats label on the right ",
+                                           "side of the plot."),
+                                    options = tooltip_options),
+
                  actionButton("make_plots",
                               label = "Make Plots of Datasets X, Y"),
 
@@ -2246,6 +2327,7 @@ server <- function(input, output, session) {
   model <- NULL
   this_version_of_asnat <- 0L
   current_version_of_asnat <- 0L
+  ASNAT_set_session_token(session$token)
 
   if (!ASNAT_is_remote_hosted) {
     model <- default_model
@@ -2568,7 +2650,7 @@ server <- function(input, output, session) {
       }
 
       ASNAT_dprint("Filtering data by model_timestamp = %s\n", match_timestamp)
-      the_unit <- NULL
+      the_units <- c()
       sources <- c()
 
       for (index in 1L:count) {
@@ -2577,6 +2659,11 @@ server <- function(input, output, session) {
         the_coverage <- coverage(the_dataset)
         parts <- unlist(strsplit(the_coverage, ".", fixed = TRUE))
         source <- parts[[1L]]
+
+        if (length(parts) == 3L) {
+          source <- paste0(source, ".", parts[[2L]])
+        }
+
         variable <- variable_name(the_dataset)
         source_variable <- source_variable(the_dataset)
         unit <- units[[index]]
@@ -2685,6 +2772,15 @@ server <- function(input, output, session) {
           enable_hover <- FALSE # Too intrusive/cluttered.
           enable_popup <- TRUE
 
+          scaled_glyph_size <- glyph_size
+          is_indoor <- grepl("indoor", the_coverage, fixed = TRUE)
+          is_openaq <- grepl("OpenAQ", the_coverage, fixed = TRUE)
+          is_castnet <- grepl("CASTNET", the_coverage, fixed = TRUE)
+
+          if (is_indoor || is_openaq || is_castnet) {
+            scaled_glyph_size <- glyph_size * 0.66
+          }
+
           the_map <<- addMarkers(map = the_map,
                                  lng = longitudes,
                                  lat = latitudes,
@@ -2693,17 +2789,17 @@ server <- function(input, output, session) {
                                  label = if (enable_hover) labels else NULL,
                                  popup = if (enable_popup) labels else NULL,
                                  icon = makeIcon(iconUrl = point_glyph_files,
-                                                 iconWidth = glyph_size,
-                                                 iconHeight = glyph_size,
+                                                 iconWidth = scaled_glyph_size,
+                                                 iconHeight = scaled_glyph_size,
                                                  popupAnchorX = 0L,
                                                  popupAnchorY = 0L))
 
-          unmatched_units <- is.null(the_unit) || the_unit != unit
+          unmatched_units <- ! (unit %in% the_units)
           ASNAT_dprint("index = %d, unmatched_units = %d\n",
                        index, as.integer(unmatched_units))
 
           if (unmatched_units) {
-            the_unit <- unit
+            the_units <- c(the_units, unit)
             variable_and_units <-
               paste0(fancy_legend_label(variable),
                      "(", fancy_legend_label(unit), ")")
@@ -2773,6 +2869,64 @@ server <- function(input, output, session) {
     }
 
     ASNAT_elapsed_timer("draw_data_on_map", timer)
+    return(the_map)
+  }
+
+
+
+  # Define function to draw timestamp on the map:
+
+  draw_timestamp_on_map <- function() {
+    ASNAT_dprint("In draw_timestamp_on_map()\n")
+
+    the_label <- NULL
+    show_mean_values <- show_mean_values_on_map(model)
+    is_local_daily <- input$timestep_size == "local daily"
+
+    if (show_mean_values) { # Draw YYYY-MM-DD - YYYY-MM-DD:
+      first_timestamp <- first_timestamp(model)
+      yyyy_mm_dd <- substr(first_timestamp, 1L, 10L)
+      the_label <- yyyy_mm_dd
+      last_timestamp <- last_timestamp(model)
+      yyyy_mm_dd <- substr(last_timestamp, 1L, 10L)
+
+      if (yyyy_mm_dd != the_label) {
+        the_label <- paste(the_label, "-", yyyy_mm_dd)
+      }
+
+      if (!is_local_daily) {
+        the_label <- paste(the_label, "UTC")
+      }
+    } else { # Draw the timestamp as YYYY-MM-DD HH:00 UTC:
+      the_timestamp <- timestamp(model)
+      yyyy_mm_dd <- substr(the_timestamp, 1L, 10L)
+      hh_mm <- substr(the_timestamp, 12L, 16L)
+      the_label <- yyyy_mm_dd
+
+      if (timestep_size(model) == "hours") {
+        the_label <- paste(the_label, hh_mm)
+        the_label <- paste(the_label, "UTC")
+
+        # If using non-UTC timezone then append timestamp for that timezone:
+
+        model_timezone <- timezone(model)
+
+        if (model_timezone != "UTC -0000") {
+         non_utc_label <-
+           ASNAT_non_utc_timestamp(start_date(model), timestep(model),
+                                   model_timezone)
+         the_label <- paste0(the_label, " = ", non_utc_label)
+        }
+      } else if (!is_local_daily) {
+        the_label <- paste(the_label, "UTC")
+      }
+    }
+
+    timestamp_label <- paste0("<label>", the_label, "</label>")
+    timestamp_html <- tags$div(HTML(timestamp_label))
+    the_map <<- addControl(map = the_map, html = timestamp_html,
+                           position = "bottomleft",
+                           layerId = "timestamp")
     return(the_map)
   }
 
@@ -3505,19 +3659,19 @@ server <- function(input, output, session) {
     output$neighbor_statistics_boxplots <- renderPlot({NULL})
     output$neighbor_statistics_boxplots_unflagged <- renderPlot({NULL})
 
-    output$interactive_boxplot_x <- renderPlot({NULL})
-    output$interactive_aqi_plot_x <- renderPlot({NULL})
-    output$interactive_timeseriesplot_x <- renderPlot({NULL})
-    output$interactive_boxplot_y <- renderPlot({NULL})
-    output$interactive_aqi_plot_y <- renderPlot({NULL})
-    output$interactive_timeseriesplot_y <- renderPlot({NULL})
-    output$interactive_scatterplot_xy <- renderPlot({NULL})
-    output$interactive_scatterplot_xy_unflagged <- renderPlot({NULL})
-    output$interactive_aqi_plot <- renderPlot({NULL})
-    output$interactive_aqi_plot_unflagged <- renderPlot({NULL})
-    output$interactive_neighbor_statistics_boxplots <- renderPlot({NULL})
+    output$interactive_boxplot_x <- renderPlotly({NULL})
+    output$interactive_aqi_plot_x <- renderPlotly({NULL})
+    output$interactive_timeseriesplot_x <- renderPlotly({NULL})
+    output$interactive_boxplot_y <- renderPlotly({NULL})
+    output$interactive_aqi_plot_y <- renderPlotly({NULL})
+    output$interactive_timeseriesplot_y <- renderPlotly({NULL})
+    output$interactive_scatterplot_xy <- renderPlotly({NULL})
+    output$interactive_scatterplot_xy_unflagged <- renderPlotly({NULL})
+    output$interactive_aqi_plot <- renderPlotly({NULL})
+    output$interactive_aqi_plot_unflagged <- renderPlotly({NULL})
+    output$interactive_neighbor_statistics_boxplots <- renderPlotly({NULL})
     output$interactive_neighbor_statistics_boxplots_unflagged <-
-      renderPlot({NULL})
+      renderPlotly({NULL})
   }
 
 
@@ -3629,8 +3783,10 @@ server <- function(input, output, session) {
                              "using the entered key."))
       } else {
         append_message(paste0("Key is valid. ",
-                              "Updated PurpleAir global sites menu ",
-                              "for the specified date range."))
+                              "Updated PurpleAir global sites list ",
+                              "for the specified date range. ",
+                              "The Purple Air Sites menu shows a subset of ",
+                              "sites within the current viewing area."))
       }
 
     } else if (nchar(key) > 0L) {
@@ -3680,6 +3836,30 @@ server <- function(input, output, session) {
 
 
 
+  # Callback for maximum_qc_airnow_menu:
+
+  observeEvent(input$maximum_qc_airnow_menu, {
+    ASNAT_dprint("In maximum_qc_airnow_menu callback.\n")
+    is_valid_input <-
+      shiny::isTruthy(input$maximum_qc_airnow_menu) &&
+      !is.na(input$maximum_qc_airnow_menu) &&
+      nchar(input$maximum_qc_airnow_menu) > 0L
+
+    if (is_valid_input) {
+      current_qc_flag <- maximum_qc_airnow(model)
+      parts <- unlist(strsplit(input$maximum_qc_airnow_menu, " "))
+      first_part <- parts[[1L]]
+      qc_flag <- as.integer(first_part)
+
+      if (qc_flag >= 0L && qc_flag <= length(ASNAT_airnow_qc_flags) &&
+          qc_flag != current_qc_flag) {
+        maximum_qc_airnow(model) <<- qc_flag
+      }
+    }
+  })
+
+
+
   # Callback for aqs_pm25_codes_menu:
 
   observeEvent(input$aqs_pm25_codes_menu, {
@@ -3692,6 +3872,23 @@ server <- function(input, output, session) {
 
     if (is_valid_input) {
       aqs_pm25_codes(model) <<- input$aqs_pm25_codes_menu
+    }
+  })
+
+
+
+  # Callback for openaq_sensor_type_menu:
+
+  observeEvent(input$openaq_sensor_type_menu, {
+    ASNAT_dprint("In openaq_sensor_type_menu callback.\n")
+    is_valid_input <-
+      shiny::isTruthy(input$openaq_sensor_type_menu) &&
+      !is.na(input$openaq_sensor_type_menu) &&
+      nchar(input$openaq_sensor_type_menu) > 0L &&
+      ASNAT_is_valid_openaq_sensor_type(input$openaq_sensor_type_menu)
+
+    if (is_valid_input) {
+      openaq_sensor_type(model) <<- input$openaq_sensor_type_menu
     }
   })
 
@@ -3783,7 +3980,7 @@ server <- function(input, output, session) {
       shiny::isTruthy(input$maximum_neighbor_distance) &&
       !is.na(input$maximum_neighbor_distance) &&
       input$maximum_neighbor_distance >= 0.0 &&
-      input$maximum_neighbor_distance <= 10000.0
+      input$maximum_neighbor_distance <= ASNAT_maximum_neighbor_distance
 
     ASNAT_dprint("is_valid_input = %d\n", as.integer(is_valid_input))
 
@@ -4231,9 +4428,11 @@ server <- function(input, output, session) {
         next
       }
 
+      compute_local_daily <- FALSE
+
       # If retrieving PurpleAir, check sites and/or revalidate key:
 
-      is_purple_air <- length(grep(fixed = TRUE, "PurpleAir", coverage)) > 0L
+      is_purple_air <- startsWith(coverage, "PurpleAir")
 
       if (is_purple_air) {
 
@@ -4261,9 +4460,13 @@ server <- function(input, output, session) {
           urls <- append(urls, message_text)
           next
         }
+
+        compute_local_daily <-
+          input$timestep_size == "local daily" &&
+          coverage == "PurpleAir.pm25_corrected"
       }
 
-      model <<- retrieve_data(model, coverage)
+      model <<- retrieve_data(model, coverage, compute_local_daily)
 
       # If no data retrieved, show error modal and skip:
 
@@ -4457,6 +4660,8 @@ server <- function(input, output, session) {
 
       if (timestep_size(model) == "hours") {
         aggregate <- "hourly"
+      } else if (input$timestep_size == "local daily") {
+        aggregate <- "local_daily"
       } else {
         aggregate <- "daily"
       }
@@ -5123,7 +5328,7 @@ server <- function(input, output, session) {
         model_output_directory <- output_directory(model)
         freezeReactiveValue(input, "output_directory")
         updateTextInput(session = session, inputId = "output_directory",
-                          value = model_output_directory)
+                        value = model_output_directory)
       }
     }
 
@@ -6928,6 +7133,26 @@ server <- function(input, output, session) {
 
 
 
+  # Callback for use_right_side_stats_label checkbox:
+
+  observeEvent(input$use_right_side_stats_label, {
+
+    if (shiny::isTruthy(input$use_right_side_stats_label)) {
+      use_right_side_stats_label(model) <<- TRUE
+    } else {
+      use_right_side_stats_label(model) <<- FALSE
+    }
+
+    # If there is data then redraw it on map with appropriate legend label:
+
+    if (dataset_count(model) > 0L) {
+      model_timestep <- timestep(model)
+      update_map_timestep(model_timestep)
+    }
+  })
+
+
+
   # Helper for fancy legend labels:
 
   fancy_legend_label <- function(label) {
@@ -7003,9 +7228,16 @@ server <- function(input, output, session) {
     }
 
     if (!is.null(file_name)) {
-      ASNAT_dprint("In draw_boxplot() calling pdf(%s)\n", file_name)
-      pdf(file_name, width = the_pdf_width, height = the_pdf_height,
-          pointsize = the_pdf_point_size)
+
+      if (endsWith(file_name, ".pdf")) {
+        ASNAT_dprint("In draw_boxplot() calling pdf(%s)\n", file_name)
+        pdf(file_name, width = the_pdf_width, height = the_pdf_height,
+            pointsize = the_pdf_point_size)
+      } else {
+        ASNAT_dprint("In draw_boxplot() calling png(%s)\n", file_name)
+        png(file_name, width = the_png_width, height = the_png_height)
+      }
+
       par(mar = c(7, 4, 4, 2))
       boxplot(measure ~ site_id, data_frame,
               main = main_title,
@@ -7166,7 +7398,7 @@ server <- function(input, output, session) {
     north <- north_bound(the_dataset)
 
     main_title <-
-      sprintf("Dataset Summary: %s %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
+      sprintf("Summary: %s %s\n%s lons:[%0.4f, %0.4f] lats:[%0.4f, %0.4f]",
               averaging,
               if (interactive) fancy_source_variable else source_variable,
               date_range, west, east, south, north)
@@ -7237,6 +7469,7 @@ server <- function(input, output, session) {
 
     x_label <- if (is_single_site) "Site_Id" else "Site_Id (0 = all)"
     pdf_file <- NULL
+    png_file <- NULL
 
     if (save_to_file) {
       directory <- output_directory(model)
@@ -7254,12 +7487,16 @@ server <- function(input, output, session) {
                site_string,
                "_boxplot.pdf")
       saved_plot_files <<- append(saved_plot_files, pdf_file)
+      png_file <- gsub(fixed = TRUE, ".pdf", ".png", pdf_file)
+      saved_plot_files <<- append(saved_plot_files, png_file)
+      result <-
+        draw_boxplot(subset_data_frame, main_title, x_label, y_label,
+                     interactive, png_file)
     }
 
     result <-
       draw_boxplot(subset_data_frame, main_title, x_label, y_label,
                    interactive, pdf_file)
-
     return(result)
   }
 
@@ -7519,9 +7756,16 @@ server <- function(input, output, session) {
       # Instead use built-in interactive plot feature 'Download plot as a png'.
 
       interactive <- FALSE
-      ASNAT_dprint("In draw_timeseries_plot() calling pdf(%s)\n", file_name)
-      pdf(file_name, width = the_pdf_width, height = the_pdf_height,
-          pointsize = the_pdf_point_size)
+
+      if (endsWith(file_name, ".pdf")) {
+        ASNAT_dprint("In draw_timeseries_plot() calling pdf(%s)\n", file_name)
+        pdf(file_name, width = the_pdf_width, height = the_pdf_height,
+            pointsize = the_pdf_point_size)
+      } else {
+        ASNAT_dprint("In draw_timeseries_plot() calling png(%s)\n", file_name)
+        png(file_name, width = the_png_width, height = the_png_height)
+      }
+
       plot_result <-
         make_timeseries_plot_helper(data_frame,
                                     timestamp_column, site_column,
@@ -7778,7 +8022,7 @@ server <- function(input, output, session) {
     north <- north_bound(the_dataset)
 
     main_title <-
-      sprintf("Dataset %s Time-series: %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
+      sprintf("%s Time-series: %s\n%s lons:[%0.4f, %0.4f] lats:[%0.4f, %0.4f]",
               averaging,
               if (interactive) fancy_source_variable else source_variable,
               date_range, west, east, south, north)
@@ -7820,6 +8064,7 @@ server <- function(input, output, session) {
     ASNAT_dprint("Rendering timeseriesplot with %s\n", source_variable)
 
     pdf_file <- NULL
+    png_file <- NULL
 
     if (save_to_file) {
       directory <- output_directory(model)
@@ -7837,6 +8082,8 @@ server <- function(input, output, session) {
                site_string,
                "_timeseries.pdf")
       saved_plot_files <<- append(saved_plot_files, pdf_file)
+      png_file <- gsub(fixed = TRUE, ".pdf", ".png", pdf_file)
+      saved_plot_files <<- append(saved_plot_files, png_file)
     }
 
     measure_column <- variable_column(the_dataset)
@@ -7870,6 +8117,21 @@ server <- function(input, output, session) {
 
     timestamp_column <- 1L
 
+    if (save_to_file) {
+      result <-
+        draw_timeseries_plot(subset_data_frame,
+                             timestamp_column, site_column, measure_column,
+                             flagged_column,
+                             subset_neighbor_data_frame,
+                             timestamp_column, neighbor_site_column,
+                             neighbor_measure_column,
+                             neighbor_flagged_column,
+                             timestamp_format, time_0, time_last,
+                             minimum, maximum,
+                             interactive, main_title, x_label, y_label,
+                             png_file)
+    }
+
     result <-
       draw_timeseries_plot(subset_data_frame,
                            timestamp_column, site_column, measure_column,
@@ -7892,7 +8154,7 @@ server <- function(input, output, session) {
   # Helper to make stats label for scatter plot:
 
   compute_scatterplot_stats <- function(x_values, y_values,
-                                        interactive, type = "default",
+                                        type = "default",
                                         r_squared_given = NULL) {
 
     complete_indices <- complete.cases(x_values, y_values)
@@ -7979,6 +8241,7 @@ server <- function(input, output, session) {
 
   make_basic_scatterplot <-
   function(x_values, y_values, main_title, x_label, y_label,
+           use_right_side_stats_label,
            has_flagged_points, point_colors,
            legend_label = NULL, legend_categories = NULL,
            legend_colormap = NULL) {
@@ -7990,11 +8253,17 @@ server <- function(input, output, session) {
     y_range <- y_maximum - y_minimum
     text_line_height <- y_range * 0.05
     stats_label_x <- x_minimum
+
+    if (use_right_side_stats_label) {
+      x_range <- x_maximum - x_minimum
+      stats_label_x <- stats_label_x + x_range * 0.85
+    }
+
     stats_label_y <- y_minimum + y_range * 0.55
     yx_line_label_x <- stats_label_x
     yx_line_label_y <- stats_label_y - text_line_height
     yx_line_label <- "_____ is line y = x"
-    stats <- compute_scatterplot_stats(x_values, y_values, FALSE)
+    stats <- compute_scatterplot_stats(x_values, y_values)
     stats_label <- stats$label
     slope <- stats$slope
     y_intercept <- stats$y_intercept
@@ -8043,6 +8312,7 @@ server <- function(input, output, session) {
 
   make_interactive_scatterplot <-
   function(x_values, y_values, main_title, x_label, y_label,
+           use_right_side_stats_label,
            has_flagged_points, point_colors,
            point_size = 4L,
            legend_label = NULL, labeled_legend_colormap = NULL,
@@ -8057,8 +8327,13 @@ server <- function(input, output, session) {
     x_range <- x_maximum - x_minimum
     y_range <- y_maximum - y_minimum
     stats_label_x <- x_minimum + x_range * 0.12
+
+    if (use_right_side_stats_label) {
+      stats_label_x <- x_minimum + x_range * 0.9
+    }
+
     stats_label_y <- y_minimum + y_range * 0.8
-    stats <- compute_scatterplot_stats(x_values, y_values, TRUE,
+    stats <- compute_scatterplot_stats(x_values, y_values,
                                        type = regression_linear,
                                        r_squared_given = r_squared)
     stats_label <- stats$label
@@ -8472,6 +8747,18 @@ server <- function(input, output, session) {
               pointsize = the_pdf_point_size)
           make_basic_scatterplot(measures_x, measures_y,
                                  main_title, x_label, y_label,
+                                 use_right_side_stats_label(model),
+                                 has_flagged_points, point_colors,
+                                 legend_label, legend_categories,
+                                 legend_colormap)
+          dev.off()
+          file_name <- gsub(fixed = TRUE, ".pdf", ".png", file_name)
+          saved_plot_files <<- append(saved_plot_files, file_name)
+          ASNAT_dprint("In draw_scatterplot() calling png(%s)\n", file_name)
+          png(file_name, width = the_png_width, height = the_png_height)
+          make_basic_scatterplot(measures_x, measures_y,
+                                 main_title, x_label, y_label,
+                                 use_right_side_stats_label(model),
                                  has_flagged_points, point_colors,
                                  legend_label, legend_categories,
                                  legend_colormap)
@@ -8482,6 +8769,7 @@ server <- function(input, output, session) {
             result <- renderPlot({
               make_basic_scatterplot(measures_x, measures_y,
                                      main_title, x_label, y_label,
+                                     use_right_side_stats_label(model),
                                      has_flagged_points, point_colors,
                                      legend_label, legend_categories,
                                      legend_colormap)
@@ -8495,6 +8783,7 @@ server <- function(input, output, session) {
               make_interactive_scatterplot(measures_x, measures_y,
                                            fancy_main_title,
                                            fancy_x_label, fancy_y_label,
+                                           use_right_side_stats_label(model),
                                            has_flagged_points,
                                            point_colors,
                                            point_size = 4L,
@@ -8681,7 +8970,7 @@ server <- function(input, output, session) {
     north <- north_bound(the_dataset)
 
     main_title <-
-      sprintf("Dataset AQI Summary: %s %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
+      sprintf("AQI Summary: %s %s\n%s lons:[%0.4f, %0.4f] lats:[%0.4f, %0.4f]",
               averaging,
               if (interactive) fancy_source_variable else source_variable,
               date_range, west, east, south, north)
@@ -8800,6 +9089,14 @@ server <- function(input, output, session) {
       ASNAT_dprint("In draw_aqi_summary_plot() calling pdf(%s)\n", file_name)
       pdf(file_name, width = the_pdf_width, height = the_pdf_height,
           pointsize = the_pdf_point_size)
+      make_basic_aqi_summary_plot(aqi_data_frame,
+                                  main_title, x_label, y_label,
+                                  legend_inset = -0.3)
+      dev.off()
+      file_name <- gsub(fixed = TRUE, ".pdf", ".png", file_name)
+      saved_plot_files <<- append(saved_plot_files, file_name)
+      ASNAT_dprint("In draw_aqi_summary_plot() calling png(%s)\n", file_name)
+      png(file_name, width = the_png_width, height = the_png_height)
       make_basic_aqi_summary_plot(aqi_data_frame,
                                   main_title, x_label, y_label,
                                   legend_inset = -0.3)
@@ -9051,6 +9348,11 @@ server <- function(input, output, session) {
               pointsize = the_pdf_point_size)
           make_basic_aqi_plot(values_x, values_y, main_title, x_label, y_label)
           dev.off()
+          file_name <- gsub(fixed = TRUE, ".pdf", ".png", file_name)
+          saved_plot_files <<- append(saved_plot_files, file_name)
+          png(file_name, width = the_png_width, height = the_png_height)
+          make_basic_aqi_plot(values_x, values_y, main_title, x_label, y_label)
+          dev.off()
         } else {
 
           if (!using_fancy_plots) {
@@ -9096,9 +9398,16 @@ server <- function(input, output, session) {
     result <- NULL
 
     if (!is.null(file_name)) {
-      ASNAT_dprint("In draw_statistics_boxplots() calling pdf(%s)\n", file_name)
-      pdf(file_name, width = the_pdf_width, height = the_pdf_height,
-          pointsize = 12L)
+
+      if (endsWith(file_name, ".pdf")) {
+        ASNAT_dprint("In draw_statistics_boxplots() calling pdf(%s)\n",
+                      file_name)
+        pdf(file_name, width = the_pdf_width, height = the_pdf_height,
+            pointsize = 12L)
+      } else {
+        png(file_name, width = the_png_width, height = the_png_height)
+      }
+
       par(mfrow = c(1L, columns), mar = c(3.1, 4.1, 5.1, 2.1))
       invisible(lapply(2L:columns,
         function(column) {
@@ -9369,7 +9678,7 @@ server <- function(input, output, session) {
     unflagged_string <- if (only_unflagged) "Unflagged " else ""
 
     main_title <-
-      sprintf("%d %sNeighbors (<= %dm) Statistics:\n%s %s vs %s\n%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
+      sprintf("%d %sNeighbors (<= %dm) Statistics:\n%s %s vs %s\n%s lons:[%0.4f, %0.4f] lats:[%0.4f, %0.4f]",
               count, unflagged_string, neighbor_distance, averaging,
               if (interactive) fancy_source_variable else source_variable,
               if (interactive) fancy_neighbor_source_variable else neighbor_source_variable,
@@ -9396,6 +9705,7 @@ server <- function(input, output, session) {
     ASNAT_dprint("Rendering neighbor statistics boxplots\n")
 
     file_name <- NULL
+    png_file <- NULL
 
     if (save_to_file) {
       directory <- output_directory(model)
@@ -9413,12 +9723,20 @@ server <- function(input, output, session) {
                gsub(fixed = TRUE, ".", "_", neighbor_source_variable),
                "_statistics_boxplots",
                if (only_unflagged) "_unflagged.pdf" else ".pdf")
-
       saved_plot_files <<- append(saved_plot_files, file_name)
+      png_file <- gsub(fixed = TRUE, ".pdf", ".png", file_name)
+      saved_plot_files <<- append(saved_plot_files, png_file)
     }
 
     aqi_statistic_target_ranges <-
       ASNAT_aqi_statistic_target_ranges(dataset_variable)
+
+    if (save_to_file) {
+      result <-
+        draw_statistics_boxplots(neighbor_statistics_data_frame,
+                                 aqi_statistic_target_ranges,
+                                 main_title, interactive, png_file)
+    }
 
     result <-
       draw_statistics_boxplots(neighbor_statistics_data_frame,
@@ -9974,6 +10292,16 @@ server <- function(input, output, session) {
 
 
 
+  # Send the download URL in the session's first flush, even while the
+  # Plots tab (and thus the button) is hidden. Otherwise the URL is sent
+  # only once, on the first flush after the Plots tab is opened, and if that
+  # flush's message is aborted client-side the button stays disabled for the
+  # whole session.
+
+  outputOptions(output, "download_plots", suspendWhenHidden = FALSE)
+
+
+
   #############################################################################
 
   # A reactive value to track if data is loaded
@@ -10066,13 +10394,19 @@ server <- function(input, output, session) {
   observe({
 
     if (data_loaded()) {
-      shinyjs::disable("retrieve_data")
-      # shinyjs::disable("load_data_from_standard_file")
-      # shinyjs::disable("show_import_fileset")
+      shinyjs::disable("start_date")
+      shinyjs::disable("days")
+      shinyjs::disable("timestep_size")
+      #shinyjs::disable("retrieve_data")
+      #shinyjs::disable("load_data_from_standard_file")
+      #shinyjs::disable("show_import_fileset")
     } else {
-      shinyjs::enable("retrieve_data")
-      # shinyjs::enable("load_data_from_standard_file")
-      # shinyjs::enable("show_import_fileset")
+      shinyjs::enable("start_date")
+      shinyjs::enable("days")
+      shinyjs::enable("timestep_size")
+      #shinyjs::enable("retrieve_data")
+      #shinyjs::enable("load_data_from_standard_file")
+      #shinyjs::enable("show_import_fileset")
     }
   })
 
@@ -10869,6 +11203,7 @@ server <- function(input, output, session) {
       main_title = paste("Corrected Data for Device", device_id, "\n", equation),
       x_label = device_data$independent_vars,
       y_label = device_data$dependent_var,
+      use_right_side_stats_label(model),
       has_flagged_points = FALSE,
       point_colors = "blue",
       point_size = as.integer(input$datapoint_size_select) + 2L,
@@ -10978,6 +11313,7 @@ server <- function(input, output, session) {
       main_title = paste("Original Data for Device", device_id, "\n", equation),
       x_label = device_data$independent_vars,
       y_label = device_data$dependent_var,
+      use_right_side_stats_label(model),
       has_flagged_points = FALSE,
       point_colors = "blue",
       point_size = as.integer(input$datapoint_size_select) + 2L,
@@ -11374,8 +11710,25 @@ server <- function(input, output, session) {
     # 3. Get the selected data and extract dataset names and IDs
     selected_data <- filtered_comparison_df()[selected_rows, ]
 
-    dataset_x_name <- sub("\\..*", "", input$dataset_x_menu[1L])
-    dataset_y_name <- sub("\\..*", "", input$dataset_y_menu[1L])
+    #dataset_x_name <- sub("\\..*", "", input$dataset_x_menu[1L])
+    #dataset_y_name <- sub("\\..*", "", input$dataset_y_menu[1L])
+
+    # If dataset_x_menu is "CASTNET.QuantAQ.pm25" then
+    # set dataset_x_name = "CASTNET_QuantAQ
+
+    parts <- unlist(strsplit(input$dataset_x_menu[1L], ".", fixed = TRUE))
+    dataset_x_name <- parts[[1L]]
+
+    if (length(parts) > 2L) {
+      dataset_x_name <- paste0(dataset_x_name, "_", parts[[2L]])
+    }
+
+    parts <- unlist(strsplit(input$dataset_y_menu[1L], ".", fixed = TRUE))
+    dataset_y_name <- parts[[1L]]
+
+    if (length(parts) > 2L) {
+      dataset_y_name <- paste0(dataset_y_name, "_", parts[[2L]])
+    }
 
     id_column_y <- paste0(dataset_y_name, ".id(-)")
 
@@ -11393,7 +11746,6 @@ server <- function(input, output, session) {
       record <- selected_data[i, ]
       id <- record[[1]]
       x_id <- record[[6]]
-
       filtered_data_y <- full_data[full_data[[id_column_y]] %in% id, ]
       min_size <- switch(input$regression_type,
                          "Linear" = 20,
@@ -11401,10 +11753,13 @@ server <- function(input, output, session) {
                          "Cubic" = 40,
                          15) # Default fallback
 
-      if (nrow(filtered_data_y) < min_size) {
+      filtered_data_y_row_count <- nrow(filtered_data_y)
+
+      if (filtered_data_y_row_count < min_size) {
         showNotification(
-          paste0("Warning: Record number (", nrow(filtered_data_y),
-                ") for ID ", id, " is too small for ",
+          paste0("Warning: Record number ", i,
+                " for ID ", id, " only has ", filtered_data_y_row_count,
+                " pairs which is is too small for ",
                 input$regression_type, " regression (recommended: ",
                 min_size, ")."),
           type = "warning",
@@ -11813,8 +12168,25 @@ server <- function(input, output, session) {
     # full_data[7] is z measurements
     full_data <- comparison_data_frame(model)
 
-    dataset_x_name <- sub("\\..*", "", input$dataset_x_menu[1L])
-    dataset_y_name <- sub("\\..*", "", input$dataset_y_menu[1L])
+    #dataset_x_name <- sub("\\..*", "", input$dataset_x_menu[1L])
+    #dataset_y_name <- sub("\\..*", "", input$dataset_y_menu[1L])
+
+    # If dataset_x_menu is "CASTNET.QuantAQ.pm25" then
+    # set dataset_x_name = "CASTNET_QuantAQ
+
+    parts <- unlist(strsplit(input$dataset_x_menu[1L], ".", fixed = TRUE))
+    dataset_x_name <- parts[[1L]]
+
+    if (length(parts) > 2L) {
+      dataset_x_name <- paste0(dataset_x_name, "_", parts[[2L]])
+    }
+
+    parts <- unlist(strsplit(input$dataset_y_menu[1L], ".", fixed = TRUE))
+    dataset_y_name <- parts[[1L]]
+
+    if (length(parts) > 2L) {
+      dataset_y_name <- paste0(dataset_y_name, "_", parts[[2L]])
+    }
 
     id_column_x <- paste0(dataset_x_name, ".id(-)")
     id_column_y <- paste0(dataset_y_name, ".id(-)")
@@ -12299,7 +12671,6 @@ server <- function(input, output, session) {
   ## selected variable in the dropdown menu (search_dataset_l)
   observeEvent(input$retrieve_var, {
 
-
     if (is.null(input$dataset_dropdown)) {
       showNotification("Please load a dataset first!", type = "error")
 
@@ -12318,12 +12689,13 @@ server <- function(input, output, session) {
         data <- dataset(model, idx)
 
         ## check if the input variable from the dropdown menu equals the data coverage name
-        if (data@coverage == input$dataset_dropdown) {
+        if (coverage(data) == input$dataset_dropdown) {
           dataset <- data_frame(data)
         } else {
           append_message("Error in dataset selection!")
         }
       }
+
       column_data(dataset)
     }
   })
@@ -12398,7 +12770,7 @@ server <- function(input, output, session) {
       while (is.null(names(dataset))) {
         data <- dataset(model, idx)
 
-        if (data@coverage == dataset_name) {
+        if (coverage(data) == dataset_name) {
           dataset <- data_frame(data)
         } else {
           append_message("Error in dataset selection!")
@@ -12430,7 +12802,7 @@ server <- function(input, output, session) {
       while (is.null(names(dataset))) {
         data <- dataset(model, idx)
 
-        if (data@coverage == dataset_name) {
+        if (coverage(data) == dataset_name) {
           dataset <- data_frame(data)
         } else {
           append_message("Error in dataset selection!")

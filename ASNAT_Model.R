@@ -50,7 +50,9 @@ methods::setClass(
    purple_air_key = "character", # For retrievals of PurpleAir data.
    purple_air_sensor = "integer", # 0 for all sensors or > 0 for a specific one.
    purple_air_sites_data_frame = "data.frame", # PurpleAir sites.
+   maximum_qc_airnow = "integer", # Maximum allowed qc flag for AirNow measures.
    aqs_pm25_codes = "character", # For optional subset of AirNow/AQS pm25 codes.
+   openaq_sensor_type = "character", # For optional filtering by Clarity, etc.
    spatial_filter_type = "character", # For optional subset of data points.
    timezone = "character", # Default is "UTC -0000".
    ok = "logical", # Did last command succeed?
@@ -59,6 +61,7 @@ methods::setClass(
    use_fancy_labels = "logical", # Use sub/superscripts and mu symbols?
    use_interactive_plots = "logical", # Use interactive plots or basic ones?
    show_site_labels = "logical", # Always show site id labels on neighbor map?
+   use_right_side_stats_label = "logical", # Draw scatterplot stats label on right?
    maximum_neighbor_distance = "numeric", # Maximum neighbor distance in meters.
    apply_maximum_neighbor_value_difference = "logical", # Apply difference flag?
    apply_maximum_neighbor_value_percent_difference = "logical", # Apply flag?
@@ -147,7 +150,13 @@ methods::setValidity("ASNAT_Model", function(object) {
   stopifnot(object@north_bound <= 90.0)
   stopifnot(object@south_bound <= object@north_bound)
   #stopifnot(ASNAT_is_conforming_purple_air_key(object@purple_air_key))
+  stopifnot(class(object@maximum_qc_airnow) == "numeric" ||
+            class(object@maximum_qc_airnow) == "integer")
+  stopifnot(as.integer(object@maximum_qc_airnow) >= 0L)
+  stopifnot(as.integer(object@maximum_qc_airnow) <=
+            length(ASNAT_airnow_qc_flags))
   stopifnot(ASNAT_is_valid_aqs_pm25_codes(object@aqs_pm25_codes))
+  stopifnot(ASNAT_is_valid_openaq_sensor_type(object@openaq_sensor_type))
   stopifnot(object@purple_air_sensor >= 0L)
   stopifnot(ncol(object@purple_air_sites_data_frame) == 0L ||
             (ncol(object@purple_air_sites_data_frame) == 4L &&
@@ -171,8 +180,10 @@ methods::setValidity("ASNAT_Model", function(object) {
   stopifnot(object@use_interactive_plots == FALSE ||
             object@use_interactive_plots == TRUE)
   stopifnot(object@show_site_labels == FALSE || object@show_site_labels == TRUE)
+  stopifnot(object@use_right_side_stats_label == FALSE ||
+            object@use_right_side_stats_label == TRUE)
   stopifnot(object@maximum_neighbor_distance >= 0.0)
-  stopifnot(object@maximum_neighbor_distance <= 10000.0)
+  stopifnot(object@maximum_neighbor_distance <= ASNAT_maximum_neighbor_distance)
   stopifnot(object@apply_maximum_neighbor_value_difference == FALSE ||
             object@apply_maximum_neighbor_value_difference == TRUE)
   stopifnot(object@apply_maximum_neighbor_value_percent_difference == FALSE ||
@@ -311,7 +322,9 @@ function(data_subdirectory = NULL) {
 
   purple_air_key <- ""
   purple_air_sensor <- 0L
+  maximum_qc_airnow <- 4L
   aqs_pm25_codes <- ASNAT_aqs_pm25_codes[[1L]]
+  openaq_sensor_type <- ASNAT_openaq_sensor_types[[1L]]
   spatial_filter_type <- "none"
   timezone <- "UTC -0000"
   legend_colormap <- "default"
@@ -319,6 +332,7 @@ function(data_subdirectory = NULL) {
   use_fancy_labels <- FALSE
   use_interactive_plots <- FALSE # Default to fast basic plots.
   show_site_labels <- FALSE
+  use_right_side_stats_label <- FALSE
   maximum_neighbor_distance <- 1000.0
   apply_maximum_neighbor_value_difference <- FALSE
   apply_maximum_neighbor_value_percent_difference <- FALSE
@@ -480,10 +494,15 @@ function(data_subdirectory = NULL) {
           if (value == TRUE) {
             show_site_labels <- TRUE
           }
+        } else if (tag == "use_right_side_stats_label") {
+
+          if (value == TRUE) {
+            use_right_side_stats_label <- TRUE
+          }
         } else if (tag == "maximum_neighbor_distance") {
           fvalue <- as.numeric(value)
 
-          if (fvalue >= 0.0 && fvalue <= 10000.0) {
+          if (fvalue >= 0.0 && fvalue <= ASNAT_maximum_neighbor_distance) {
             maximum_neighbor_distance <- fvalue
           }
         } else if (tag == "apply_maximum_neighbor_value_difference") {
@@ -594,17 +613,31 @@ function(data_subdirectory = NULL) {
             long_missing_threshold <- ivalue
           }
         } else if (tag == "purple_air_key") {
-          purple_air_key <- value
+
+          if (ASNAT_is_conforming_purple_air_key(value)) {
+            purple_air_key <- value
+          }
         } else if (tag == "purple_air_sensor") {
           ivalue <- as.integer(value)
 
           if (ivalue >= 0) {
             purple_air_sensor <- ivalue
           }
+        } else if (tag == "maximum_qc_airnow") {
+          ivalue <- as.integer(value)
+
+          if (ivalue >= 0L && ivalue <= length(ASNAT_airnow_qc_flags)) {
+            maximum_qc_airnow <- ivalue
+          }
         } else if (tag == "aqs_pm25_codes") {
 
           if (ASNAT_is_valid_aqs_pm25_codes(value)) {
             aqs_pm25_codes <- value
+          }
+        } else if (tag == "openaq_sensor_type") {
+
+          if (ASNAT_is_valid_openaq_sensor_type(value)) {
+            openaq_sensor_type <- value
           }
         } else if (tag == "spatial_filter_type") {
 
@@ -647,15 +680,17 @@ function(data_subdirectory = NULL) {
 
   purple_air_sites_data_frame <- data.frame()
 
-  if (current_version(dataset_manager) > 0L && nchar(purple_air_key) > 0L) {
-    yyyy_mm_dd1 <- as.character(start_date)
-    yyyy_mm_dd2 <- as.character(start_date + days)
-    purple_air_sites_data_frame <-
-      retrieve_purple_air_sites(dataset_manager,
-                                yyyy_mm_dd1,
-                                yyyy_mm_dd2,
-                                purple_air_key)
-  }
+# Nevermind: it takes too long when starting with large object@days.
+#
+#  if (current_version(dataset_manager) > 0L && nchar(purple_air_key) > 0L) {
+#    yyyy_mm_dd1 <- as.character(start_date)
+#    yyyy_mm_dd2 <- as.character(start_date + days)
+#    purple_air_sites_data_frame <-
+#      retrieve_purple_air_sites(dataset_manager,
+#                                yyyy_mm_dd1,
+#                                yyyy_mm_dd2,
+#                                purple_air_key)
+#  }
 
   object <- new("ASNAT_Model",
                 app_directory = app_directory,
@@ -672,7 +707,9 @@ function(data_subdirectory = NULL) {
                 purple_air_key = purple_air_key,
                 purple_air_sensor = purple_air_sensor,
                 purple_air_sites_data_frame = purple_air_sites_data_frame,
+                maximum_qc_airnow = maximum_qc_airnow,
                 aqs_pm25_codes = aqs_pm25_codes,
+                openaq_sensor_type = openaq_sensor_type,
                 spatial_filter_type = spatial_filter_type,
                 timezone = timezone,
                 ok = TRUE,
@@ -681,6 +718,7 @@ function(data_subdirectory = NULL) {
                 use_fancy_labels = use_fancy_labels,
                 use_interactive_plots = use_interactive_plots,
                 show_site_labels = show_site_labels,
+                use_right_side_stats_label = use_right_side_stats_label,
                 maximum_neighbor_distance = maximum_neighbor_distance,
                 apply_maximum_neighbor_value_difference =
                   apply_maximum_neighbor_value_difference,
@@ -769,6 +807,9 @@ function(object) object@use_interactive_plots)
 ASNAT_declare_method("ASNAT_Model", "show_site_labels",
 function(object) object@show_site_labels)
 
+ASNAT_declare_method("ASNAT_Model", "use_right_side_stats_label",
+function(object) object@use_right_side_stats_label)
+
 ASNAT_declare_method("ASNAT_Model", "app_directory",
 function(object) object@app_directory)
 
@@ -824,8 +865,14 @@ function(object) object@purple_air_sensor)
 ASNAT_declare_method("ASNAT_Model", "purple_air_sites",
 function(object) object@purple_air_sites_data_frame)
 
+ASNAT_declare_method("ASNAT_Model", "maximum_qc_airnow",
+function(object) object@maximum_qc_airnow)
+
 ASNAT_declare_method("ASNAT_Model", "aqs_pm25_codes",
 function(object) object@aqs_pm25_codes)
+
+ASNAT_declare_method("ASNAT_Model", "openaq_sensor_type",
+function(object) object@openaq_sensor_type)
 
 ASNAT_declare_method("ASNAT_Model", "spatial_filter_type",
 function(object) object@spatial_filter_type)
@@ -1518,6 +1565,23 @@ function(object, value) {
 
 
 
+# Change maximum_qc_airnow:
+# Example: maximum_qc_airnow(asnat_model) <<- TRUE
+
+ASNAT_declare_method("ASNAT_Model", "maximum_qc_airnow<-",
+function(object, value) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(class(value) == "numeric" || class(value) == "integer")
+  stopifnot(as.integer(value) >= 0L)
+  stopifnot(as.integer(value) <= length(ASNAT_airnow_qc_flags))
+  object@maximum_qc_airnow <- as.integer(value)
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
 # Change aqs_pm25_codes:
 # Example: aqs_pm25_codes(asnat_model) <<- aqs_pm25_codes
 
@@ -1527,6 +1591,22 @@ function(object, value) {
   stopifnot(class(value) == "character")
   stopifnot(ASNAT_is_valid_aqs_pm25_codes(value))
   object@aqs_pm25_codes <- value
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
+# Change openaq_sensor_type:
+# Example: openaq_sensor_type(asnat_model) <<- openaq_sensor_type
+
+ASNAT_declare_method("ASNAT_Model", "openaq_sensor_type<-",
+function(object, value) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(class(value) == "character")
+  stopifnot(ASNAT_is_valid_openaq_sensor_type(value))
+  object@openaq_sensor_type <- value
   object@ok <- TRUE
   ASNAT_check(methods::validObject(object))
   return(object)
@@ -1649,6 +1729,21 @@ function(object, value) {
 
 
 
+# Change use_right_side_stats_label:
+# Example: use_right_side_stats_label(asnat_model) <<- TRUE
+
+ASNAT_declare_method("ASNAT_Model", "use_right_side_stats_label<-",
+function(object, value) {
+  ASNAT_check(methods::validObject(object))
+  stopifnot(value == TRUE || value == FALSE)
+  object@use_right_side_stats_label <- value
+  object@ok <- TRUE
+  ASNAT_check(methods::validObject(object))
+  return(object)
+})
+
+
+
 # Change maximum_neighbor_distance:
 # Example: maximum_neighbor_distance(asnat_model) <<- 500.0
 
@@ -1656,7 +1751,7 @@ ASNAT_declare_method("ASNAT_Model", "maximum_neighbor_distance<-",
 function(object, value) {
   ASNAT_check(methods::validObject(object))
   stopifnot(value >= 0.0)
-  stopifnot(value <= 10000.0)
+  stopifnot(value <= ASNAT_maximum_neighbor_distance)
   object@maximum_neighbor_distance <- value
   object@ok <- TRUE
   ASNAT_check(methods::validObject(object))
@@ -2748,7 +2843,7 @@ function(object, dataset_x_name, dataset_x_variable,
     south <- south_bound(dataset_x)
     north <- north_bound(dataset_x)
     object@comparison_subtitle <-
-      sprintf("%s (%0.4f, %0.4f) - (%0.4f, %0.4f)",
+      sprintf("%s lons:[%0.4f, %0.4f] lats:[%0.4f, %0.4f]",
               date_range, west, east, south, north)
     object@comparison_r2_subtitle <- object@comparison_subtitle
     object@aqi_statistics_subtitle <- object@comparison_subtitle
@@ -2808,10 +2903,8 @@ function(object, dataset_x_name, dataset_x_variable,
       y_id_label <- paste0(coverage_source_dataset_y, ".id(-)")
       y_flagged_label <- paste0(coverage_source_dataset_y, ".flagged(-)")
       flagged_y <- data_frame_y[indices_y, flagged_column_y]
-      # Added flagged_x for filtering
       flagged_column_x <- ASNAT_flagged_column_index(column_names_x)
       flagged_x <- data_frame_x[indices_x, flagged_column_x]
-
 
       maximum_difference <-
         if (object@apply_maximum_neighbor_value_difference) object@maximum_neighbor_value_difference else
@@ -2921,8 +3014,6 @@ function(object, dataset_x_name, dataset_x_variable,
           count <- length(match_sites)
           matched_measures_z <- rep(as.numeric(NA), count)
           sites_z_matched <- rep(as.integer(NA), count)
-          longitudes_z <- data_frame_z[, 2L]
-          latitudes_z <- data_frame_z[, 3L]
 
           for (row in 1L:count) {
             timestamp <- match_timestamps[[row]]
@@ -3007,6 +3098,7 @@ function(object, dataset_x_name, dataset_x_variable,
               which(sites_x == site_x & sites_y == site_y &
                     flagged_x == "0" & flagged_y == "0" &
                     !is.na(measures_x) & !is.na(measures_y))
+
             n <- length(paired_sites_rows)
 
             if (n > 0L) {
@@ -3358,7 +3450,7 @@ function(object, dataset_x_name, dataset_x_variable,
 # }
 
 ASNAT_declare_method("ASNAT_Model", "retrieve_data",
-function(object, coverage) {
+function(object, coverage, compute_local_daily = FALSE) {
   timer <- ASNAT_start_timer()
   ASNAT_check(methods::validObject(object))
   aggregate <- "hourly"
@@ -3377,7 +3469,10 @@ function(object, coverage) {
                   object@south_bound, object@north_bound,
                   object@purple_air_key,
                   object@purple_air_sensor,
-                  object@aqs_pm25_codes)
+                  object@maximum_qc_airnow,
+                  object@aqs_pm25_codes,
+                  object@openaq_sensor_type,
+                  compute_local_daily)
   object@ok <- ok(object@dataset_manager)
 
   # Write retrieved URLs to log file:
@@ -3750,7 +3845,9 @@ function(object) {
         "north_bound ", object@north_bound, "\n",
         "purple_air_key ", object@purple_air_key, "\n",
         "purple_air_sensor ", object@purple_air_sensor, "\n",
+        "maximum_qc_airnow ", object@maximum_qc_airnow, "\n",
         "aqs_pm25_codes ", object@aqs_pm25_codes, "\n",
+        "openaq_sensor_type ", object@openaq_sensor_type, "\n",
         "spatial_filter_type ", object@spatial_filter_type, "\n",
         "timezone ", gsub(fixed = TRUE, " ", "_", object@timezone), "\n",
         "legend_colormap ", object@legend_colormap, "\n",
@@ -3758,6 +3855,7 @@ function(object) {
         "use_fancy_labels ", object@use_fancy_labels, "\n",
         "use_interactive_plots ", object@use_interactive_plots, "\n",
         "show_site_labels ", object@show_site_labels, "\n",
+        "use_right_side_stats_label ", object@use_right_side_stats_label, "\n",
         "maximum_neighbor_distance ", object@maximum_neighbor_distance, "\n",
         "apply_maximum_neighbor_value_difference ", object@apply_maximum_neighbor_value_difference, "\n",
         "maximum_neighbor_value_difference ", object@maximum_neighbor_value_difference, "\n",

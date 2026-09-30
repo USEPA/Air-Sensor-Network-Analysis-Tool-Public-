@@ -12,6 +12,16 @@
 
 ASNAT_is_remote_hosted <- Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect"
 
+ASNAT_session_token <- ""
+
+ASNAT_set_session_token <- function(token) {
+  ASNAT_session_token <<- token
+}
+
+ASNAT_get_session_token <- function() {
+  return(ASNAT_session_token)
+}
+
 ###############################################################################
 # Load required libraries:
 ###############################################################################
@@ -91,6 +101,24 @@ ASNAT_na_strings <-
 ASNAT_output_missing_value <- -9999.0
 ASNAT_output_missing_string <- "-9999.0"
 
+# Maximum distance in meters to allow for neighbor measurement comparisons:
+
+ASNAT_maximum_neighbor_distance <- 500000L
+
+# Default http timeout seconds for webservice data retrievals.
+# If a webservice call does not return any bytes before the timeout seconds
+# then the retrieval attempt will stop and a failure will be reported.
+# Specifying 300 means give up in 5 minutes if no data is stremaed.
+# 0 means 'unlimited' but even using 0 will still timeout after perhaps
+# 15 minutes if no data has started streaming.
+# This limit depends on the http configuration of external servers.
+# Once data has started (and continues) streaming it will not timeout.
+# ASNAT sequentially requests one day of data at a time and concatenates
+# these for multi-day requests. So a user request for 30 days of data causes a
+# sequence of 30 one-day requests - each of which must complete before the
+# timeout seconds.
+
+ASNAT_default_timeout_seconds <- 0L
 
 # Print debug messages to stderr and perform extra checks?
 
@@ -507,6 +535,186 @@ ASNAT_offset_timestamp <- function(iso_timestamp, offset_hours) {
   time_h <- time_0 + seconds_offset
   result <- format(time_h, "%Y-%m-%dT%H:%M")
   stopifnot(nchar(result) == 16L)
+  return(result)
+}
+
+
+
+# Get standard time UTC hour offset at longitude, latitude location.
+# hour_offset <- ASNAT_UTC_offset_at_location(-90, 30)
+# hour_offset is -6.
+# Uses MazamaSpatialUtils::getTimezone(). SLOW.
+
+ASNAT_UTC_offset_at_location <- function(longitude, latitude) {
+  timer <- ASNAT_start_timer()
+  stopifnot(is.numeric(longitude))
+  stopifnot(longitude >= -180.0)
+  stopifnot(longitude <= 180.0)
+  stopifnot(is.numeric(latitude))
+  stopifnot(latitude >= -90.0)
+  stopifnot(latitude <= 90.0)
+
+  # MazamaSpatialUtils::getTimezone() fails for some non-land locations,
+  # e.g., (-90, 25) so try locations at higher and lower latitudes. UGLY HACK.
+
+  result <- as.numeric(NA)
+  other_latitude <- latitude
+  latitude_offset <- 5.0
+
+  repeat {
+    subset_spatial_data_frame <-
+      MazamaSpatialUtils::getTimezone(longitude, other_latitude,
+                                      allData = TRUE, useBuffering = TRUE)
+    result <-
+      as.integer(max(subset_spatial_data_frame$UTC_STD_offset, na.rm = TRUE))
+
+    if (!is.na(result)) {
+      break
+    } else {
+      other_latitude <- other_latitude + latitude_offset
+
+      if (other_latitude > 90.0) {
+        break
+      }
+    }
+  }
+
+  if (is.na(result)) {
+    other_latitude <- latitude
+
+    repeat {
+      subset_spatial_data_frame <-
+        MazamaSpatialUtils::getTimezone(longitude, other_latitude,
+                                        allData = TRUE, useBuffering = TRUE)
+      result <-
+        as.integer(max(subset_spatial_data_frame$UTC_STD_offset, na.rm = TRUE))
+
+      if (!is.na(result)) {
+        break
+      } else {
+        other_latitude <- other_latitude - latitude_offset
+
+        if (other_latitude < -90.0) {
+          break
+        }
+      }
+    }
+  }
+
+  ASNAT_elapsed_timer("ASNAT_UTC_offset_at_location:", timer)
+  ASNAT_debug(str, result)
+  stopifnot(is.na(result) || (result >= -23L && result <= 23L))
+  return(result)
+}
+
+
+
+# Get first and last UTC timestamps of local day with UTC hour offset.
+# result <- ASNAT_local_day_hourly_timestamps("2022-06-01", -6)
+# result$first = "2022-06-01T06"
+# result$last = "2022-06-02T05"
+
+ASNAT_local_day_hourly_timestamps <- function(yyyy_mm_dd, utc_hour_offset) {
+  stopifnot(nchar(yyyy_mm_dd) == 10L)
+  stopifnot(is.numeric(utc_hour_offset))
+  stopifnot(as.integer(utc_hour_offset) >= -23L)
+  stopifnot(as.integer(utc_hour_offset) <= 23L)
+
+  iso_timestamp <- paste0(yyyy_mm_dd, "T00:00:00-0000")
+  offset_hours <- -utc_hour_offset
+  first_timestamp <- ASNAT_offset_timestamp(iso_timestamp, offset_hours)
+  first_timestamp <-
+    paste0(substr(first_timestamp, 1L, 10L), "T",
+           substr(first_timestamp, 12L, 13L))
+  last_timestamp <- ASNAT_offset_timestamp(iso_timestamp, offset_hours + 23L)
+  last_timestamp <-
+    paste0(substr(last_timestamp, 1L, 10L), "T",
+           substr(last_timestamp, 12L, 13L))
+  result <- list(first = first_timestamp, last = last_timestamp)
+
+  ASNAT_debug(str, result)
+  stopifnot((nchar(result$first) == 13L &&
+            nchar(result$last) == 13L &&
+            result$first <= result$last))
+  return(result)
+}
+
+
+
+# Get local hourly timestamps of UTC hourly timestamps.
+# result <- ASNAT_local_hourly_timestamps(utc_timestamps, -6)
+
+ASNAT_local_hourly_timestamps <- function(utc_timestamps, utc_hour_offset) {
+  stopifnot(is.character(utc_timestamps))
+  stopifnot(length(utc_timestamps) > 0L)
+  stopifnot(nchar(utc_timestamps[[1L]]) == 24L)
+  stopifnot(is.numeric(utc_hour_offset))
+  stopifnot(as.integer(utc_hour_offset) >= -23L)
+  stopifnot(as.integer(utc_hour_offset) <= 23L)
+
+  result <- rep("", length(utc_timestamps))
+  index <- 0L
+
+  for (utc_timestamp in utc_timestamps) {
+    local_timestamp <- ASNAT_offset_timestamp(utc_timestamp, -utc_hour_offset)
+    local_timestamp <-
+      paste0(substr(local_timestamp, 1L, 10L),
+             "T",
+             substr(local_timestamp, 12L, 13L),
+             ":00:00-0000")
+    index <- index + 1L
+    result[[index]] <- local_timestamp
+  }
+
+  stopifnot(length(result) == length(utc_timestamps))
+  stopifnot(nchar(result[[1L]]) == 24L)
+  return(result)
+}
+
+
+
+# Get mean and count of local day measures.
+# result <- ASNAT_local_daily_mean("2022-06-01", -6, timestamps, measures)
+# result$mean is local daily mean value
+# result$count is the number of hours measured for that day.
+
+ASNAT_local_daily_mean <- function(yyyy_mm_dd, hour_offset, timestamps,
+                                   measures) {
+  timer <- ASNAT_start_timer()
+  stopifnot(nchar(yyyy_mm_dd) == 10L)
+  stopifnot(is.numeric(hour_offset))
+  stopifnot(as.integer(hour_offset) >= -23L)
+  stopifnot(as.integer(hour_offset) <= 23L)
+  stopifnot(length(timestamps) > 0L)
+  stopifnot(is.character(timestamps))
+  stopifnot(nchar(timestamps[[1L]]) >= 13L)
+  stopifnot(length(measures) == length(timestamps))
+  stopifnot(is.numeric(measures))
+
+  result <- list(mean = as.numeric(NA), count = 0L)
+  local_day_timestamps <-
+    ASNAT_local_day_hourly_timestamps(yyyy_mm_dd, hour_offset)
+
+  if (!is.null(local_day_timestamps)) {
+    first_timestamp <- local_day_timestamps$first
+    last_timestamp <- local_day_timestamps$last
+    ASNAT_dprint(" %s %s ", first_timestamp, last_timestamp)
+    hourly_timestamps <- substr(timestamps, 1L, 13L) # "2022-06-01T12"
+    matched_rows <- which(hourly_timestamps >= first_timestamp &
+                          hourly_timestamps <= last_timestamp)
+
+    if (length(matched_rows) > 0L) {
+      site_measures <- measures[matched_rows]
+      non_missing_site_measures <- site_measures[!is.na(site_measures)]
+      result$count <- length(non_missing_site_measures)
+
+      if (result$count > 0L) {
+        result$mean <- mean(non_missing_site_measures)
+      }
+    }
+  }
+
+  ASNAT_elapsed_timer("ASNAT_local_daily_mean:", timer)
   return(result)
 }
 
@@ -992,6 +1200,25 @@ function(spatial_filter_type, place_names, data_frame) {
 
 
 
+# AirNow QC flags:
+# https://www.airnowtech.org/resources/airnow_quality-control.pdf
+# https://www.airnowtech.org/resources/AIRNow-I_AQCSV-Final.pdf
+# page 28.
+
+ASNAT_airnow_qc_flags <-
+  c("0 = Valid",
+    "1 = Adjusted",
+    "2 = Averaged",
+    "3 = interpolated",
+    "4 = Estimated",
+    "5 = Suspect",
+    "6 = Suspect (audit failure)",
+    "7 = Insufficient data",
+    "8 = Missing",
+    "9 = Invalid")
+
+
+
 # AQS/AirNow pm25 parameter codes:
 # https://aqs.epa.gov/aqsweb/documents/codetables/parameters.html
 
@@ -1011,6 +1238,26 @@ ASNAT_aqs_pm25_codes <-
     "88500",
     "88501",
     "88502")
+
+
+
+# OpenAQ sensor types:
+
+ASNAT_openaq_sensor_types <-
+  c("all",
+    "ABCD",
+    "Aernode",
+    "AIO",
+    "AirGradient",
+    "AirVisual",
+    "BAM",
+    "BEACO2N",
+    "Clarity",
+    "Government",
+    "HabitatMap",
+    "Miri",
+    "RAMP",
+    "Senstate")
 
 
 
@@ -1104,7 +1351,9 @@ ASNAT_aqi_statistic_target_ranges <- function(variable_units) {
                    rmse = c(0.0, 7.0),
                    nrmse = c(0.0, 30.0))
   } else if ((startsWith(variable_units, "ozone") ||
-              grepl(".ozone", variable_units, fixed = TRUE)) &&
+              startsWith(variable_units, "o3") ||
+              grepl(".ozone", variable_units, fixed = TRUE) ||
+              grepl(".o3", variable_units, fixed = TRUE)) &&
               endsWith(variable_units, "(ppb)")) {
     result <- list(r2 = c(0.8, 1.0),
                    slope = c(0.8, 1.2),
@@ -1164,7 +1413,9 @@ ASNAT_is_aqi_variable <- function(variable_units) {
              grepl(".pm25", variable_units, fixed = TRUE)) {
     result <- endsWith(variable_units, "(ug/m3)")
   } else if (startsWith(variable_units, "ozone") ||
-             grepl(".ozone", variable_units, fixed = TRUE)) {
+             startsWith(variable_units, "o3") ||
+             grepl(".ozone", variable_units, fixed = TRUE) ||
+             grepl(".o3", variable_units, fixed = TRUE)) {
     result <- endsWith(variable_units, "(ppb)")
   }
 
@@ -1210,10 +1461,14 @@ ASNAT_is_aqi_compatible <- function(variable_units1, variable_units2) {
       endsWith(variable_units1, "(ug/m3)") &&
       endsWith(variable_units2, "(ug/m3)")
   } else if (startsWith(variable_units1, "ozone") ||
-             grepl(".ozone", variable_units1, fixed = TRUE)) {
+             startsWith(variable_units1, "o3") ||
+             grepl(".ozone", variable_units1, fixed = TRUE) ||
+             grepl(".o3", variable_units1, fixed = TRUE)) {
     result <-
       (startsWith(variable_units2, "ozone") ||
-       grepl(".ozone", variable_units1, fixed = TRUE)) &&
+       startsWith(variable_units2, "o3") ||
+       grepl(".ozone", variable_units1, fixed = TRUE) ||
+       grepl(".o3", variable_units1, fixed = TRUE)) &&
       endsWith(variable_units1, "(ppb)") &&
       endsWith(variable_units2, "(ppb)")
   }
@@ -1329,7 +1584,9 @@ ASNAT_aqi_indices <- function(variable, is_hourly, values) {
              endsWith(variable, "(ug/m3)")) {
     result <- ASNAT_aqi_data_indices(values, ASNAT_pm25_daily_aqi_breakpoints)
   } else if ((startsWith(variable, "ozone") ||
-              grepl(".ozone", variable, fixed = TRUE)) &&
+              startsWith(variable, "o3") ||
+              grepl(".ozone", variable, fixed = TRUE) ||
+              grepl(".o3", variable, fixed = TRUE)) &&
               endsWith(variable, "(ppb)")) {
 
     if (is_hourly) {
@@ -1375,7 +1632,9 @@ ASNAT_aqi_colors <- function(variable, is_hourly, values) {
                             ASNAT_pm25_daily_aqi_breakpoints,
                             ASNAT_aqi_colormap)
   } else if ((startsWith(variable, "ozone") ||
-              grepl(".ozone", variable, fixed = TRUE)) &&
+              startsWith(variable, "o3") ||
+              grepl(".ozone", variable, fixed = TRUE) ||
+              grepl(".o3", variable, fixed = TRUE)) &&
               endsWith(variable, "(ppb)")) {
 
     if (is_hourly) {
@@ -1456,7 +1715,9 @@ ASNAT_aqi_variable_breakpoints <- function(variable, is_hourly) {
              endsWith(variable, "(ug/m3)")) {
     result <- ASNAT_pm25_daily_aqi_breakpoints
   } else if ((startsWith(variable, "ozone") ||
-              grepl(".ozone", variable, fixed = TRUE)) &&
+              startsWith(variable, "o3") ||
+              grepl(".ozone", variable, fixed = TRUE) ||
+              grepl(".o3", variable, fixed = TRUE)) &&
               endsWith(variable, "(ppb)")) {
 
     if (is_hourly) {
@@ -1511,7 +1772,6 @@ function(variable, is_hourly, measures_x, measures_y) {
       rmse <- sqrt(mse)
       mean_x_values <- mean(aqi_measures_x, na.rm = TRUE)
       nrmse <- rmse / mean_x_values * 100.0
-      abs_x_values <- abs(aqi_measures_x)
       mbe <- mean(err, na.rm = TRUE)
       nmbe <- mbe / mean_x_values * 100.0
       aqi_name <- ASNAT_aqi_names[[aqi_category]]
@@ -1577,6 +1837,7 @@ ASNAT_neighbor_statistics <- function(neighbors_data_frame, only_unflagged) {
   for (site_x in unique_sites_x) {
 
     for (site_y in unique_sites_y) {
+      paired_sites_rows <- c()
 
       if (only_unflagged) {
         paired_sites_rows <-
@@ -1698,6 +1959,89 @@ ASNAT_platform <- function() {
 
 
 
+# Get IP address of this computer.
+
+ASNAT_get_ip_address <- function() {
+  platform <- ASNAT_platform()
+  result <- ""
+
+  if (platform == "Windows") {
+    ipconfig_info <- system("ipconfig", intern = TRUE)
+    addresses <- ipconfig_info[grep("IPv4", ipconfig_info)]
+    result <- gsub(".*? ([[:digit:]])", "\\1", addresses)
+  } else if (platform == "Linux.x86_64") {
+    result <- system("/bin/hostname -i", intern = TRUE)
+  } else if (platform == "Darwin.x86_64" || platform == "Darwin.arm64") {
+    result <- system("/usr/sbin/ipconfig getifaddr en0", intern = TRUE)
+  }
+
+  ASNAT_dprint("ASNAT_get_ip_address() returning result = %s\n", result)
+  return(result)
+}
+
+
+
+# Get serial number of this computer.
+
+ASNAT_get_serial_number <- function() {
+  platform <- ASNAT_platform()
+  result <- ""
+
+  if (platform == "Windows") {
+    quote <- "\""
+    command <-
+      paste0("powershell ",
+             quote,
+             "(Get-CimInstance -ClassName Win32_ComputerSystemProduct).UUID",
+             quote)
+    result <- system(command, intern = TRUE)
+  } else if (platform == "Darwin.x86_64" || platform == "Darwin.arm64") {
+    command <-
+      "ioreg -l | grep IOPlatformSerialNumber | awk '{ print $NF }' "
+      "| tr -c -d '[:alnum:]'"
+    result <- system(command, intern = TRUE)
+  } else if (platform == "Linux.x86_64") {
+    hostname <- Sys.getenv("HOSTNAME")
+    remotehost <- Sys.getenv("REMOTEHOST")
+    session_id <- Sys.getenv("XDG_SESSION_ID")
+    pid <- Sys.getpid()
+    result <- paste0(hostname, "-", remotehost, "-", session_id, "-", pid)
+  }
+
+  ASNAT_dprint("ASNAT_get_ip_address() returning result = %s\n", result)
+  return(result)
+}
+
+
+
+# Ensure rsigserver WCS includes RSIG_ID:
+
+ASNAT_augmented_url <- function(url) {
+  option <- "&RSIG_ID=asnat-"
+  result <- url
+
+  if (grepl("/rsigserver?", url, fixed = TRUE) &&
+      grepl("COVERAGE=", url, fixed = TRUE) &&
+      !grepl(option, url, fixed = TRUE)) {
+    ip_address <- ASNAT_get_ip_address()
+    serial_number <- ASNAT_get_serial_number()
+    session_id <- ""
+
+    if (ASNAT_is_remote_hosted) {
+      session_id <- paste0("-", ASNAT_session_token)
+    }
+
+    id <- paste0(ip_address, "-", serial_number, session_id)
+    filtered_id <- gsub("[^-_:a-zA-Z0-9.]", "", id)
+    result <-  paste0(url, option, filtered_id)
+  }
+
+  ASNAT_dprint("ASNAT_augmented_url() returning result = %s\n", result)
+  return(result)
+}
+
+
+
 # Use curl program to retrieve data from url to a file and return TRUE if
 # successful else FALSE.
 
@@ -1716,13 +2060,15 @@ ASNAT_http_get_curl <-
            " --output ", double_quote, output_file_name, double_quote, " ")
   current_directory <- getwd()
   platform <- ASNAT_platform()
+  augmented_url <- ASNAT_augmented_url(url)
 
   if (startsWith(platform, "Windows")) {
     command <-
       paste0(current_directory, "/Windows/bin/curl.exe ", args,
-             double_quote, url, double_quote)
+             double_quote, augmented_url, double_quote)
   } else {
-    command <- paste0("/usr/bin/curl ", args, single_quote, url, single_quote)
+    command <-
+      paste0("/usr/bin/curl ", args, single_quote, augmented_url, single_quote)
   }
 
   ASNAT_dprint("%s\n", command)
@@ -1758,7 +2104,8 @@ ASNAT_http_get <-
 
     if (result) {
       ASNAT_dprint("httr::GET(%s, timeout = %d)\n", url, timeout_seconds)
-      response <- httr::GET(url, httr::timeout(timeout_seconds))
+      response <-
+        httr::GET(ASNAT_augmented_url(url), httr::timeout(timeout_seconds))
       status <- httr::status_code(response)
       ASNAT_dprint("status = %d\n", status)
 
@@ -1908,6 +2255,20 @@ ASNAT_is_valid_aqs_pm25_codes <- function(aqs_pm25_codes) {
 
   if (nchar(aqs_pm25_codes)) {
     result <- aqs_pm25_codes %in% ASNAT_aqs_pm25_codes
+  }
+
+  return(result)
+}
+
+
+
+# Is sensor_type a valid subset of OpenAQ sensor types?
+
+ASNAT_is_valid_openaq_sensor_type <- function(sensor_type) {
+  result <- FALSE
+
+  if (nchar(sensor_type)) {
+    result <- sensor_type %in% ASNAT_openaq_sensor_types
   }
 
   return(result)
@@ -3351,7 +3712,7 @@ ASNAT_width_height <- function(west, east, south, north) {
 # Return a pair of the nearest site_id and meters distance to a given point:
 
 ASNAT_nearest_site <-
-function(longitude, latitude, longitudes, latitudes, site_ids) {
+function(longitude, latitude, site_id, longitudes, latitudes, site_ids) {
   stopifnot(longitude >= -180.0)
   stopifnot(longitude <= 180.0)
   stopifnot(latitude >= -90.0)
@@ -3369,29 +3730,33 @@ function(longitude, latitude, longitudes, latitudes, site_ids) {
   nearest_distance_squared <- 1e30
 
   for (index in seq_along(site_ids)) {
-    site_longitude <- longitudes[[index]]
-    longitude_distance <- longitude - site_longitude
+    other_site_id <- site_ids[[index]]
 
-    if (longitude_distance < 0.0) {
-      longitude_distance <- -longitude_distance
-    }
+    if (other_site_id != site_id) {
+      site_longitude <- longitudes[[index]]
+      longitude_distance <- longitude - site_longitude
 
-    if (longitude_distance < nearest_distance_squared) {
-      site_latitude <- latitudes[[index]]
-      latitude_distance <- latitude - site_latitude
-
-      if (latitude_distance < 0.0) {
-        latitude_distance <- -latitude_distance
+      if (longitude_distance < 0.0) {
+        longitude_distance <- -longitude_distance
       }
 
-      if (latitude_distance < nearest_distance_squared) {
-        distance_squared <-
-          longitude_distance * longitude_distance +
-          latitude_distance * latitude_distance
+      if (longitude_distance < nearest_distance_squared) {
+        site_latitude <- latitudes[[index]]
+        latitude_distance <- latitude - site_latitude
 
-        if (distance_squared < nearest_distance_squared) {
-          nearest_distance_squared <- distance_squared
-          nearest_index <- index
+        if (latitude_distance < 0.0) {
+          latitude_distance <- -latitude_distance
+        }
+
+        if (latitude_distance < nearest_distance_squared) {
+          distance_squared <-
+            longitude_distance * longitude_distance +
+            latitude_distance * latitude_distance
+
+          if (distance_squared < nearest_distance_squared) {
+            nearest_distance_squared <- distance_squared
+            nearest_index <- index
+          }
         }
       }
     }
@@ -3569,7 +3934,7 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
             (class(data_frame2) == "data.frame" && ncol(data_frame2) >= 6L))
   stopifnot(timesteps >= 1L)
   stopifnot(delta_meters >= 0)
-  stopifnot(delta_meters <= 10000)
+  stopifnot(delta_meters <= ASNAT_maximum_neighbor_distance)
   stopifnot(nchar(delimiter) == 1L)
   stopifnot(!is.null(output_file))
 
@@ -3596,6 +3961,7 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
   site_ids2 <- NULL
   longitudes2 <- NULL
   latitudes2 <- NULL
+  is_self_compare <- FALSE
 
   if (compare) {
     subset_data_frame2 <- data_frame2[, c(site_column2, 2L, 3L)]
@@ -3603,6 +3969,7 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
     site_ids2 <- subset_data_frame2[[1L]]
     longitudes2 <- subset_data_frame2[[2L]]
     latitudes2 <- subset_data_frame2[[3L]]
+    is_self_compare <- identical(data_frame, data_frame2)
   }
 
   for (site_id in unique_site_ids) {
@@ -3616,7 +3983,7 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
     site_data_frame <- data_frame[site_rows, ]
 
     nearest_other_site_id <- 0L
-    nearest_other_site_distance <- 0.0
+    nearest_other_site_distance <- 1e30
 
     if (compare) {
       longitude <- (site_data_frame[[2L]])[[1L]]
@@ -3627,10 +3994,12 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
       if (ASNAT_use_cpp_functions) {
         nearest_other_site <-
           ASNAT_nearest_site_cpp(longitude, latitude,
+                                 if (is_self_compare) site_id else 0,
                                  longitudes2, latitudes2, site_ids2)
       } else {
         nearest_other_site <-
           ASNAT_nearest_site(longitude, latitude,
+                             if (is_self_compare) site_id else 0,
                              longitudes2, latitudes2, site_ids2)
       }
 
@@ -3638,7 +4007,9 @@ function(data_frame, measure_column, data_frame2, timesteps, delta_meters,
       nearest_other_site_distance <- nearest_other_site$distance
     }
 
-    if (nearest_other_site_distance <= delta_meters) {
+    if (!compare ||
+        (nearest_other_site_id  != 0 &&
+         nearest_other_site_distance <= delta_meters)) {
       timestamps <- site_data_frame[[1L]]
       reported_count <- length(timestamps)
       timestamp_first <- timestamps[[1L]]
@@ -3707,15 +4078,20 @@ function(data_frame_x, data_frame_y, delta_meters, is_hourly) {
   stopifnot(nrow(data_frame_y) >= 1L)
   stopifnot(!is.null(delta_meters))
   stopifnot(delta_meters >= 0)
-  stopifnot(delta_meters <= 10000)
+  stopifnot(delta_meters <= ASNAT_maximum_neighbor_distance)
   stopifnot(class(is_hourly) == "logical")
 
   result <- NULL
+  column_names_x <- colnames(data_frame_x)
+  site_column_x <- ASNAT_site_column_index(column_names_x)
+  column_names_y <- colnames(data_frame_y)
+  site_column_y <- ASNAT_site_column_index(column_names_y)
 
   if (ASNAT_use_cpp_functions) {
     timer_cpp <- ASNAT_start_timer()
     result <-
       ASNAT_compare_datasets_cpp(data_frame_x, data_frame_y,
+                                 site_column_x, site_column_y,
                                  delta_meters, is_hourly)
     ASNAT_elapsed_timer("ASNAT_compare_datasets_cpp:", timer_cpp)
   } else {
@@ -3736,37 +4112,41 @@ function(data_frame_x, data_frame_y, delta_meters, is_hourly) {
     for (row_x in 1L:rows_x) {
       timestamp_x <- data_frame_x[[row_x, 1L]]
       timestamp_x <- substr(timestamp_x, 1L, timestamp_length)
-
       longitude_x <- data_frame_x[[row_x, 2L]]
       latitude_x <- data_frame_x[[row_x, 3L]]
+      site_id_x <- data_frame_x[[row_x, site_column_x]]
       timestamp_matches <- 0L
 
       for (row_y in row_start_y:rows_y) {
-        timestamp_y <- data_frame_y[[row_y, 1L]]
-        timestamp_y <- substr(timestamp_y, 1L, timestamp_length)
+        site_id_y <- data_frame_y[[row_y, site_column_y]]
 
-        # Note: data_frame timestamps are (assumed to be) sorted
-        # so the break logic below can be used to shorten this inner loop.
+        if (site_id_y != site_id_x) {
+          timestamp_y <- data_frame_y[[row_y, 1L]]
+          timestamp_y <- substr(timestamp_y, 1L, timestamp_length)
 
-        if (timestamp_y > timestamp_x) {
-          row_start_y <- row_y - timestamp_matches
-          break
-        }
+          # Note: data_frame timestamps are (assumed to be) sorted
+          # so the break logic below can be used to shorten this inner loop.
 
-        if (timestamp_y == timestamp_x) {
-          longitude_y <- data_frame_y[[row_y, 2L]]
-          latitude_y <- data_frame_y[[row_y, 3L]]
-          is_neighbor <-
-            ASNAT_is_nearby_point(delta_meters,
-                                  longitude_x, latitude_x,
-                                  longitude_y, latitude_y)
+          if (timestamp_y > timestamp_x) {
+            row_start_y <- row_y - timestamp_matches
+            break
+          }
 
-          timestamp_matches <- timestamp_matches + 1L
+          if (timestamp_y == timestamp_x) {
+            longitude_y <- data_frame_y[[row_y, 2L]]
+            latitude_y <- data_frame_y[[row_y, 3L]]
+            is_neighbor <-
+              ASNAT_is_nearby_point(delta_meters,
+                                    longitude_x, latitude_x,
+                                    longitude_y, latitude_y)
 
-          if (is_neighbor) {
-            result_count <- result_count + 1L
-            result_x[[result_count]] <- row_x
-            result_y[[result_count]] <- row_y
+            timestamp_matches <- timestamp_matches + 1L
+
+            if (is_neighbor) {
+              result_count <- result_count + 1L
+              result_x[[result_count]] <- row_x
+              result_y[[result_count]] <- row_y
+            }
           }
         }
       }
@@ -4020,6 +4400,8 @@ ASNAT_validate_input_data_frame <- function(data_frame, aggregate) {
                       previous_timestamp <- timestamp
                     } else {
                       failure <- "Sites must have at most one row per hour.\n"
+                      ASNAT_dprint("Redundant site = %d, timestamp = %s\n",
+                                   site, timestamp)
                       ok <- FALSE
                       break
                     }
@@ -4616,7 +4998,8 @@ ASNAT_import <- function(file_list_data_frame, aggregate, longitude, latitude) {
   stopifnot(length(file_list_data_frame$datapath) > 0L)
   stopifnot(aggregate == "none" ||
             aggregate == "hourly" ||
-            aggregate == "daily")
+            aggregate == "daily" ||
+            aggregate == "local_daily")
   stopifnot(longitude >= -180.0)
   stopifnot(longitude <=  180.0)
   stopifnot(latitude >= -90.0)
@@ -4637,6 +5020,19 @@ ASNAT_import <- function(file_list_data_frame, aggregate, longitude, latitude) {
   if (!is.null(result)) {
 
     if (aggregate != "none") {
+
+      if (aggregate == "local_daily") {
+        utc_hour_offset <- ASNAT_UTC_offset_at_location(longitude, latitude)
+
+        if (!is.na(utc_hour_offset) && utc_hour_offset != 0L) {
+          utc_timestamps <- result[[1L]]
+          local_timestamps <-
+            ASNAT_local_hourly_timestamps(utc_timestamps, utc_hour_offset)
+          result[[1L]] <- local_timestamps
+        }
+
+        aggregate <- "daily"
+      }
 
       # Sort data frame by site (column 4) then time (column 1):
 
@@ -4681,13 +5077,15 @@ ASNAT_nowcast_parameters <- function(variable_units) {
         endsWith(variable_units, "(ug/m3)")) {
       result <-
         list(window_hours = 12L, minimum_weight_factor = 0.5, digits = 0L)
-    } else if (startsWith(variable_units, "pm25") ||
-               grepl(".pm25", variable_units, fixed = TRUE) &&
+    } else if ((startsWith(variable_units, "pm25") ||
+                grepl(".pm25", variable_units, fixed = TRUE)) &&
                endsWith(variable_units, "(ug/m3)")) {
       result <-
         list(window_hours = 12L, minimum_weight_factor = 0.5, digits = 1L)
-    } else if (startsWith(variable_units, "ozone") ||
-               grepl(".ozone", variable_units, fixed = TRUE) &&
+    } else if ((startsWith(variable_units, "ozone") ||
+                startsWith(variable_units, "o3") ||
+                grepl(".ozone", variable_units, fixed = TRUE) ||
+                grepl(".o3", variable_units, fixed = TRUE)) &&
                endsWith(variable_units, "(ppb)")) {
       result <-
         list(window_hours = 8L, minimum_weight_factor = 0.0, digits = 0L)
